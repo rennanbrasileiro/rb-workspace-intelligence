@@ -16,3 +16,4 @@ jobs:
       - run: npm run build
       - run: python -m py_compile agent/reader.py agent/folder_index.py
       - run: node scripts/smoke-organizer.mjs
+      - run: node scripts/smoke-execution.mjs
