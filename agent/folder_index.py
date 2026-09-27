@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
-import json, re, sys, unicodedata
+import json, logging, re, sys, unicodedata, warnings
 from collections import Counter
 from pathlib import Path
 from reader import extract
+
+# A comunicação com o agente Node precisa sobreviver a nomes de arquivos com
+# caracteres inválidos/surrogates vindos de acervos antigos do Windows.
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
+except Exception:
+    pass
+logging.getLogger('pypdf').setLevel(logging.ERROR)
+warnings.filterwarnings('ignore', message='.*fontTools.*')
 
 SUPPORTED={'.pdf','.docx','.xlsx','.pptx','.txt','.csv','.json','.md','.xml','.html','.htm','.log','.yaml','.yml','.js','.css','.ts','.tsx','.jsx'}
 BUCKET_RULES={
@@ -35,6 +45,10 @@ TOPIC_RULES={
   'Relatórios':['relatorio','relatório','status report','dashboard','indicador'],
 }
 STOP=set('a o e de da do das dos em para por com sem um uma uns umas no na nos nas ao aos que se sua seu suas seus meu minha meus minhas este esta isso esse essa arquivo documento final novo nova copia copy versao versão v1 v2 v3 2024 2025 2026 html pdf docx xlsx txt csv json'.split())
+
+def dump(value):
+    # ensure_ascii=True evita UnicodeEncodeError com nomes legados inválidos.
+    return json.dumps(value, ensure_ascii=True)
 
 def fold(v):
     v=unicodedata.normalize('NFD',str(v or '').lower())
@@ -112,7 +126,7 @@ def main():
             })
         except Exception as e:
             raw.append({'path':str(p),'name':p.name,'error':str(e),'bucket':'Documentos','confidence':'low'})
-        print('RB_PROGRESS '+json.dumps({'processed':processed,'total':total,'file':p.name},ensure_ascii=False),file=sys.stderr,flush=True)
+        print('RB_PROGRESS '+dump({'processed':processed,'total':total,'file':p.name}),file=sys.stderr,flush=True)
 
     df=Counter()
     for d in raw:
@@ -139,9 +153,9 @@ def main():
                 d['topic']=d.get('bucket') or 'Geral'; d['topicConfidence']='low'
         d.pop('_counts',None);d.pop('_nameWords',None)
 
-    print(json.dumps({'ok':True,'documents':raw,'count':len(raw)},ensure_ascii=False))
+    print(dump({'ok':True,'documents':raw,'count':len(raw)}))
 
 if __name__=='__main__':
     try:main()
     except Exception as e:
-        print(json.dumps({'ok':False,'error':str(e)},ensure_ascii=False));sys.exit(1)
+        print(dump({'ok':False,'error':str(e)}));sys.exit(1)
