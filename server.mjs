@@ -13,6 +13,7 @@ import { githubLocalStatus, listGithubRepositories, beginGithubLogin, installGit
 import { listProjectTree } from './core/project_tree.mjs';
 import { startRuntime, runtimeStatus, stopRuntime, restartRuntime, openRuntime } from './core/runtime.mjs';
 import { startOrganizerJob, organizerJobStatus, cancelOrganizerJob } from './core/organizer_jobs.mjs';
+import { startExecutionJob, executionJobStatus, cancelExecutionJob } from './core/execution_jobs.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
 const port=Number(process.env.PORT||4310);
@@ -37,7 +38,7 @@ async function projectWithTree(id){const project=await inspectLocalProject(id);i
 
 const server=http.createServer(async(req,res)=>{try{
   const u=new URL(req.url,'http://127.0.0.1');
-  if(u.pathname==='/api/system'&&req.method==='GET'){const ws=await getWorkspaceSummary(),state=await readState();return sendJson(res,200,{ok:true,version:'1.5.0',machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,...ws});}
+  if(u.pathname==='/api/system'&&req.method==='GET'){const ws=await getWorkspaceSummary(),state=await readState();return sendJson(res,200,{ok:true,version:'1.6.0',machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,...ws});}
   if(u.pathname==='/api/spaces'&&req.method==='POST')return sendJson(res,200,{ok:true,space:await upsertSpace(await body(req))});
   if(u.pathname.startsWith('/api/spaces/')&&req.method==='DELETE')return sendJson(res,200,{ok:true,removed:await removeSpace(decodeURIComponent(u.pathname.split('/').pop()))});
   if(u.pathname==='/api/pick/folder'&&req.method==='POST')return sendJson(res,200,{ok:true,path:powershellDialog('folder')});
@@ -46,6 +47,10 @@ const server=http.createServer(async(req,res)=>{try{
   if(u.pathname==='/api/organizer/jobs'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,job:startOrganizerJob({path:b.path,spaceId:b.spaceId})});}
   if(u.pathname.startsWith('/api/organizer/jobs/')&&u.pathname.endsWith('/cancel')&&req.method==='POST'){const id=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,job:cancelOrganizerJob(id)});}
   if(u.pathname.startsWith('/api/organizer/jobs/')&&req.method==='GET'){const id=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,job:organizerJobStatus(id)});}
+
+  if(u.pathname==='/api/execution/jobs'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,job:startExecutionJob({planId:b.planId,operationIds:b.operationIds})});}
+  if(u.pathname.startsWith('/api/execution/jobs/')&&u.pathname.endsWith('/cancel')&&req.method==='POST'){const id=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,job:cancelExecutionJob(id)});}
+  if(u.pathname.startsWith('/api/execution/jobs/')&&req.method==='GET'){const id=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,job:executionJobStatus(id)});}
 
   if(u.pathname==='/api/workspace/scan'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,scan:await scanFolder(b.path,b.spaceId)});}
   if(u.pathname==='/api/workspace/analyze'&&req.method==='POST'){const b=await body(req),plan=await analyzeScan(b.scanId,b.spaceId),state=await readState(),scan=state.scans.find(s=>s.id===b.scanId);let enriched=plan;try{const docs=indexFolderDocuments(scan?.files||[]);enriched=enrichPlanWithDocuments(plan,docs);await replacePlan(enriched);}catch(e){enriched={...plan,documentIntelligence:{count:0,readComplete:0,failed:0,error:e.message},findings:[...(plan.findings||[]),{type:'document_read_error',severity:'low',message:`A organização estrutural foi concluída, mas a leitura documental encontrou um problema: ${e.message}`}]};await replacePlan(enriched);}return sendJson(res,200,{ok:true,plan:enriched});}
@@ -83,4 +88,4 @@ const server=http.createServer(async(req,res)=>{try{
 }catch(e){console.error('[RBWI]',e.stack||e.message||e);if((req.url||'').startsWith('/api/'))return sendJson(res,400,{ok:false,error:e.message||String(e)});res.writeHead(404,{'content-type':'text/plain; charset=utf-8'});res.end('Not found');}});
 server.on('clientError',(err,socket)=>{console.error('[HTTP]',err.message);socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');});
 process.on('uncaughtException',e=>console.error('[UNCAUGHT]',e));process.on('unhandledRejection',e=>console.error('[UNHANDLED]',e));
-server.listen(port,'127.0.0.1',()=>console.log(`RB Workspace Intelligence v1.5.0 · http://127.0.0.1:${port} · ${repoRoot}`));
+server.listen(port,'127.0.0.1',()=>console.log(`RB Workspace Intelligence v1.6.0 · http://127.0.0.1:${port} · ${repoRoot}`));
