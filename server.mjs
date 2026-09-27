@@ -25,10 +25,10 @@ function safeStatic(base,rel){const p=path.resolve(base,rel);if(!p.startsWith(pa
 function powershellDialog(kind){
   if(process.platform!=='win32')throw new Error('O seletor nativo está disponível no Windows.');
   const home=os.homedir().replace(/'/g,"''");
-  const owner=`Add-Type -AssemblyName System.Windows.Forms; $owner=New-Object System.Windows.Forms.Form; $owner.TopMost=$true; $owner.ShowInTaskbar=$false; $owner.StartPosition='Manual'; $owner.Location=New-Object System.Drawing.Point(-32000,-32000); $owner.Size=New-Object System.Drawing.Size(1,1); $owner.Show(); $owner.Activate();`;
+  const owner=`Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; Add-Type @'\nusing System;\nusing System.Runtime.InteropServices;\npublic class RBWin32 { [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd); [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd); }\n'@; $owner=New-Object System.Windows.Forms.Form; $owner.Text='RB Workspace Intelligence'; $owner.TopMost=$true; $owner.ShowInTaskbar=$false; $owner.StartPosition='CenterScreen'; $owner.Width=2; $owner.Height=2; $owner.Opacity=0.02; $owner.Show(); $owner.BringToFront(); $owner.Activate(); [RBWin32]::BringWindowToTop($owner.Handle) | Out-Null; [RBWin32]::SetForegroundWindow($owner.Handle) | Out-Null; Start-Sleep -Milliseconds 120;`;
   const script=kind==='folder'
-    ? `${owner} $d=New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description='Escolha a pasta que o Workspace Intelligence deve analisar'; $d.ShowNewFolderButton=$true; $d.SelectedPath='${home}'; if($d.ShowDialog($owner) -eq 'OK'){Write-Output $d.SelectedPath}; $owner.Close()`
-    : `${owner} $d=New-Object System.Windows.Forms.OpenFileDialog; $d.Title='Escolha um documento para inspeção'; $d.InitialDirectory='${home}'; $d.Filter='Documentos suportados|*.pdf;*.docx;*.xlsx;*.pptx;*.txt;*.csv;*.json;*.md;*.xml;*.html;*.htm|Todos os arquivos|*.*'; if($d.ShowDialog($owner) -eq 'OK'){Write-Output $d.FileName}; $owner.Close()`;
+    ? `${owner} $d=New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description='RB Workspace Intelligence - escolha a pasta para analisar'; $d.ShowNewFolderButton=$true; $d.SelectedPath='${home}'; $result=$d.ShowDialog($owner); if($result -eq [System.Windows.Forms.DialogResult]::OK){Write-Output $d.SelectedPath}; $owner.Close()`
+    : `${owner} $d=New-Object System.Windows.Forms.OpenFileDialog; $d.Title='RB Workspace Intelligence - escolha um documento'; $d.InitialDirectory='${home}'; $d.Filter='Documentos suportados|*.pdf;*.docx;*.xlsx;*.pptx;*.txt;*.csv;*.json;*.md;*.xml;*.html;*.htm|Todos os arquivos|*.*'; $result=$d.ShowDialog($owner); if($result -eq [System.Windows.Forms.DialogResult]::OK){Write-Output $d.FileName}; $owner.Close()`;
   const r=spawnSync('powershell.exe',['-NoProfile','-STA','-Command',script],{encoding:'utf8',windowsHide:false,maxBuffer:2*1024*1024});
   if(r.status)throw new Error(r.stderr||'Não foi possível abrir o seletor do Windows.');
   const selected=(r.stdout||'').trim();if(!selected)return null;return assertAllowedPath(selected);
@@ -45,7 +45,7 @@ const server=http.createServer(async(req,res)=>{
   try{
     const u=new URL(req.url,'http://127.0.0.1');
     if(u.pathname==='/api/system'&&req.method==='GET'){
-      const ws=await getWorkspaceSummary();const state=await readState();return sendJson(res,200,{ok:true,version:'1.3.0',machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,...ws});
+      const ws=await getWorkspaceSummary();const state=await readState();return sendJson(res,200,{ok:true,version:'1.4.0',machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,...ws});
     }
     if(u.pathname==='/api/spaces'&&req.method==='POST')return sendJson(res,200,{ok:true,space:await upsertSpace(await body(req))});
     if(u.pathname.startsWith('/api/spaces/')&&req.method==='DELETE')return sendJson(res,200,{ok:true,removed:await removeSpace(decodeURIComponent(u.pathname.split('/').pop()))});
@@ -98,4 +98,4 @@ const server=http.createServer(async(req,res)=>{
 });
 server.on('clientError',(err,socket)=>{console.error('[HTTP]',err.message);socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');});
 process.on('uncaughtException',e=>console.error('[UNCAUGHT]',e));process.on('unhandledRejection',e=>console.error('[UNHANDLED]',e));
-server.listen(port,'127.0.0.1',()=>console.log(`RB Workspace Intelligence v1.3.0 · http://127.0.0.1:${port} · ${repoRoot}`));
+server.listen(port,'127.0.0.1',()=>console.log(`RB Workspace Intelligence v1.4.0 · http://127.0.0.1:${port} · ${repoRoot}`));
