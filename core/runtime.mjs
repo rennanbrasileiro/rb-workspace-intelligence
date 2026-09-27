@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 const jobs=new Map();
 const MAX_LOG=1200;
@@ -19,7 +19,7 @@ async function runServer(job,command){set(job,{status:'starting',step:'Inicializ
   }
   set(job,{status:'running_no_url',step:'Rodando sem URL confirmada'});append(job,'system','O processo continua ativo, mas nenhuma URL HTTP respondeu em 30 segundos. Veja o log abaixo.');
 }
-function openBrowser(url){if(!url)return;if(process.platform==='win32'){const c=spawn('cmd.exe',['/d','/s','/c',`start "" "${url}"`],{detached:true,stdio:'ignore',windowsHide:true});c.unref();}else{const c=spawn('sh',['-lc',`xdg-open '${url.replaceAll("'","'\\''")}' >/dev/null 2>&1 || open '${url.replaceAll("'","'\\''")}'`],{detached:true,stdio:'ignore'});c.unref();}}
+function openBrowser(url){if(!url)return;if(process.platform==='win32'){const c=spawn('cmd.exe',['/d','/s','/c',`start "" "${url}"`],{detached:true,stdio:'ignore',windowsHide:true});c.unref();}else{const safe=url.replaceAll("'","'\\''");const c=spawn('sh',['-lc',`xdg-open '${safe}' >/dev/null 2>&1 || open '${safe}'`],{detached:true,stdio:'ignore'});c.unref();}}
 async function pipeline(job,project,mode){try{
   if(mode==='prepare'||mode==='build'){
     if(project.commands?.install){set(job,{step:'Dependências'});await runFinite(job,project.commands.install,'Dependências');}
@@ -32,6 +32,6 @@ async function pipeline(job,project,mode){try{
 }
 export function startRuntime(project,mode='prepare'){stopRuntime(project.id);const job={projectId:project.id,cwd:project.path,status:'queued',step:'Preparando',command:'',startedAt:now(),updatedAt:now(),expectedUrl:project.localUrl||'',detectedUrl:'',readyUrl:'',error:'',logs:[],steps:[],child:null};jobs.set(project.id,job);append(job,'system',`Projeto: ${project.name}`);append(job,'system',`Pasta: ${project.path}`);pipeline(job,project,mode);return publicJob(job);}
 export function runtimeStatus(projectId){return publicJob(jobs.get(projectId));}
-export function stopRuntime(projectId){const job=jobs.get(projectId);if(!job)return{status:'idle',logs:[]};if(job.child){try{if(process.platform==='win32'){spawn('taskkill',['/PID',String(job.child.pid),'/T','/F'],{windowsHide:true});}else job.child.kill('SIGTERM');}catch{}}set(job,{status:'stopped',step:'Parado',endedAt:now()});append(job,'system','Processo interrompido pelo usuário.');job.child=null;return publicJob(job);}
+export function stopRuntime(projectId){const job=jobs.get(projectId);if(!job)return{status:'idle',logs:[]};if(job.child){try{if(process.platform==='win32'){spawnSync('taskkill',['/PID',String(job.child.pid),'/T','/F'],{windowsHide:true,encoding:'utf8'});}else job.child.kill('SIGTERM');}catch{}}set(job,{status:'stopped',step:'Parado',endedAt:now()});append(job,'system','Processo interrompido pelo usuário.');job.child=null;return publicJob(job);}
 export function restartRuntime(project,mode='prepare'){stopRuntime(project.id);return startRuntime(project,mode);}
 export function openRuntime(projectId,fallbackUrl=''){const job=jobs.get(projectId);const url=job?.readyUrl||job?.detectedUrl||job?.expectedUrl||fallbackUrl;if(!url)throw new Error('Ainda não há URL detectada para este projeto.');openBrowser(url);return{url};}
