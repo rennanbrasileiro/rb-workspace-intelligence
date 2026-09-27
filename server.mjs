@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { ensureState, readState, upsertSpace, removeSpace } from './core/storage.mjs';
 import { scanFolder, analyzeScan, executePlan, rollbackTransaction, commonFolders, getWorkspaceSummary, assertAllowedPath } from './core/workspace.mjs';
 import { devStatus, runConsole, projectAction, checkUpdate, pullUpdate, restartApp, addProject, repoRoot } from './core/dev.mjs';
+import { listLocalProjects, inspectLocalProject, cloneLocalProject, addExistingProject, createEmptyProject, localProjectAction, localGit, localConsole } from './core/projects.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
 const port=Number(process.env.PORT||4310);
@@ -20,8 +21,8 @@ function safeStatic(base,rel){const p=path.resolve(base,rel);if(!p.startsWith(pa
 function powershellDialog(kind){
   if(process.platform!=='win32')throw new Error('O seletor nativo está disponível no Windows.');
   const script=kind==='folder'
-    ? `Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description='Escolha uma pasta para o Workspace Intelligence'; if($d.ShowDialog() -eq 'OK'){Write-Output $d.SelectedPath}`
-    : `Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.OpenFileDialog; $d.Title='Escolha um documento'; $d.Filter='Documentos suportados|*.pdf;*.docx;*.xlsx;*.pptx;*.txt;*.csv;*.json;*.md;*.xml|Todos os arquivos|*.*'; if($d.ShowDialog() -eq 'OK'){Write-Output $d.FileName}`;
+    ? `$s=New-Object -ComObject Shell.Application; $f=$s.BrowseForFolder(0,'Escolha uma pasta para o RB Workspace Intelligence',0,0); if($f){Write-Output $f.Self.Path}`
+    : `Add-Type -AssemblyName System.Windows.Forms; $owner=New-Object System.Windows.Forms.Form; $owner.TopMost=$true; $owner.ShowInTaskbar=$false; $owner.Opacity=0; $owner.Show(); $d=New-Object System.Windows.Forms.OpenFileDialog; $d.Title='Escolha um documento'; $d.Filter='Documentos suportados|*.pdf;*.docx;*.xlsx;*.pptx;*.txt;*.csv;*.json;*.md;*.xml|Todos os arquivos|*.*'; if($d.ShowDialog($owner) -eq 'OK'){Write-Output $d.FileName}; $owner.Close()`;
   const r=spawnSync('powershell.exe',['-NoProfile','-STA','-Command',script],{encoding:'utf8',windowsHide:true});if(r.status)throw new Error(r.stderr||'Não foi possível abrir o seletor.');const selected=(r.stdout||'').trim();if(!selected)return null;return assertAllowedPath(selected);
 }
 function readDocument(input){
@@ -35,7 +36,7 @@ const server=http.createServer(async(req,res)=>{
   try{
     const u=new URL(req.url,'http://127.0.0.1');
     if(u.pathname==='/api/system'&&req.method==='GET'){
-      const ws=await getWorkspaceSummary();const state=await readState();return sendJson(res,200,{ok:true,version:'1.0.0',machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,...ws});
+      const ws=await getWorkspaceSummary();const state=await readState();return sendJson(res,200,{ok:true,version:'1.1.0',machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,...ws});
     }
     if(u.pathname==='/api/spaces'&&req.method==='POST')return sendJson(res,200,{ok:true,space:await upsertSpace(await body(req))});
     if(u.pathname.startsWith('/api/spaces/')&&req.method==='DELETE')return sendJson(res,200,{ok:true,removed:await removeSpace(decodeURIComponent(u.pathname.split('/').pop()))});
@@ -46,6 +47,16 @@ const server=http.createServer(async(req,res)=>{
     if(u.pathname==='/api/workspace/execute'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,transaction:await executePlan(b.planId,b.operationIds)});}
     if(u.pathname.startsWith('/api/transactions/')&&u.pathname.endsWith('/rollback')&&req.method==='POST'){const parts=u.pathname.split('/');return sendJson(res,200,{ok:true,transaction:await rollbackTransaction(parts[3])});}
     if(u.pathname==='/api/document/read'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,document:readDocument(b.path)});}
+
+    if(u.pathname==='/api/projects/status'&&req.method==='GET')return sendJson(res,200,{ok:true,...await listLocalProjects()});
+    if(u.pathname.startsWith('/api/projects/')&&u.pathname.endsWith('/inspect')&&req.method==='GET'){const id=decodeURIComponent(u.pathname.split('/')[3]);return sendJson(res,200,{ok:true,project:await inspectLocalProject(id)});}
+    if(u.pathname==='/api/projects/clone'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,project:await cloneLocalProject(b.repository)});}
+    if(u.pathname==='/api/projects/local'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,project:await addExistingProject(b.path)});}
+    if(u.pathname==='/api/projects/create'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,project:await createEmptyProject(b.name)});}
+    if(u.pathname==='/api/projects/action'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,message:await localProjectAction(b.projectId,b.action)});}
+    if(u.pathname==='/api/projects/git'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,result:await localGit(b.projectId,b.action,{message:b.message,repository:b.repository})});}
+    if(u.pathname==='/api/projects/command'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,result:await localConsole(b.projectId,b.command)});}
+
     if(u.pathname==='/api/dev/status'&&req.method==='GET')return sendJson(res,200,{ok:true,...await devStatus()});
     if(u.pathname==='/api/dev/command'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,result:await runConsole(b.projectId,b.command)});}
     if(u.pathname==='/api/dev/project'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,message:await projectAction(b.projectId,b.action)});}
@@ -64,4 +75,4 @@ const server=http.createServer(async(req,res)=>{
 });
 server.on('clientError',(err,socket)=>{console.error('[HTTP]',err.message);socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');});
 process.on('uncaughtException',e=>console.error('[UNCAUGHT]',e));process.on('unhandledRejection',e=>console.error('[UNHANDLED]',e));
-server.listen(port,'127.0.0.1',()=>console.log(`RB Workspace Intelligence v1.0.0 · http://127.0.0.1:${port} · Dev Console: http://127.0.0.1:${port}/devhub/ · ${repoRoot}`));
+server.listen(port,'127.0.0.1',()=>console.log(`RB Workspace Intelligence v1.1.0 · http://127.0.0.1:${port} · Dev Console: http://127.0.0.1:${port}/devhub/ · ${repoRoot}`));
