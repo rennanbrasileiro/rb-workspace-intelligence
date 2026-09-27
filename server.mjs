@@ -11,6 +11,7 @@ import { listLocalProjects, inspectLocalProject, cloneLocalProject, addExistingP
 import { indexFolderDocuments, enrichPlanWithDocuments } from './core/documents.mjs';
 import { githubLocalStatus, listGithubRepositories, beginGithubLogin, installGithubCli } from './core/github_local.mjs';
 import { listProjectTree } from './core/project_tree.mjs';
+import { startRuntime, runtimeStatus, stopRuntime, restartRuntime, openRuntime } from './core/runtime.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
 const port=Number(process.env.PORT||4310);
@@ -38,12 +39,13 @@ function readDocument(input){
   try{parsed=JSON.parse((r.stdout||'').trim())}catch{throw new Error(r.stderr||'O extrator de documentos não retornou uma resposta válida.');}
   if(r.status||!parsed.ok)throw new Error(parsed.error||r.stderr||'Falha ao ler documento.');return parsed.document;
 }
+async function projectWithTree(id){const project=await inspectLocalProject(id);if(project.exists){const fullTree=await listProjectTree(project.path);project.tree=fullTree;project.stats={files:fullTree.files,folders:fullTree.folders};}return project;}
 
 const server=http.createServer(async(req,res)=>{
   try{
     const u=new URL(req.url,'http://127.0.0.1');
     if(u.pathname==='/api/system'&&req.method==='GET'){
-      const ws=await getWorkspaceSummary();const state=await readState();return sendJson(res,200,{ok:true,version:'1.2.0',machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,...ws});
+      const ws=await getWorkspaceSummary();const state=await readState();return sendJson(res,200,{ok:true,version:'1.3.0',machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,...ws});
     }
     if(u.pathname==='/api/spaces'&&req.method==='POST')return sendJson(res,200,{ok:true,space:await upsertSpace(await body(req))});
     if(u.pathname.startsWith('/api/spaces/')&&req.method==='DELETE')return sendJson(res,200,{ok:true,removed:await removeSpace(decodeURIComponent(u.pathname.split('/').pop()))});
@@ -61,11 +63,7 @@ const server=http.createServer(async(req,res)=>{
     if(u.pathname==='/api/document/read'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,document:readDocument(b.path)});}
 
     if(u.pathname==='/api/projects/status'&&req.method==='GET')return sendJson(res,200,{ok:true,...await listLocalProjects()});
-    if(u.pathname.startsWith('/api/projects/')&&u.pathname.endsWith('/inspect')&&req.method==='GET'){
-      const id=decodeURIComponent(u.pathname.split('/')[3]);const project=await inspectLocalProject(id);
-      if(project.exists){const fullTree=await listProjectTree(project.path);project.tree=fullTree;project.stats={files:fullTree.files,folders:fullTree.folders};}
-      return sendJson(res,200,{ok:true,project});
-    }
+    if(u.pathname.startsWith('/api/projects/')&&u.pathname.endsWith('/inspect')&&req.method==='GET'){const id=decodeURIComponent(u.pathname.split('/')[3]);return sendJson(res,200,{ok:true,project:await projectWithTree(id)});}
     if(u.pathname==='/api/projects/clone'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,project:await cloneLocalProject(b.repository)});}
     if(u.pathname==='/api/projects/local'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,project:await addExistingProject(b.path)});}
     if(u.pathname==='/api/projects/create'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,project:await createEmptyProject(b.name)});}
@@ -76,6 +74,11 @@ const server=http.createServer(async(req,res)=>{
     if(u.pathname==='/api/projects/github/repos'&&req.method==='GET')return sendJson(res,200,{ok:true,...await listGithubRepositories()});
     if(u.pathname==='/api/projects/github/login'&&req.method==='POST')return sendJson(res,200,{ok:true,...beginGithubLogin()});
     if(u.pathname==='/api/projects/github/install'&&req.method==='POST')return sendJson(res,200,{ok:true,...installGithubCli()});
+    if(u.pathname==='/api/projects/runtime/start'&&req.method==='POST'){const b=await body(req);const project=await projectWithTree(b.projectId);return sendJson(res,200,{ok:true,runtime:startRuntime(project,b.mode||'prepare')});}
+    if(u.pathname==='/api/projects/runtime/stop'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,runtime:stopRuntime(b.projectId)});}
+    if(u.pathname==='/api/projects/runtime/restart'&&req.method==='POST'){const b=await body(req);const project=await projectWithTree(b.projectId);return sendJson(res,200,{ok:true,runtime:restartRuntime(project,b.mode||'prepare')});}
+    if(u.pathname==='/api/projects/runtime/open'&&req.method==='POST'){const b=await body(req);const project=await projectWithTree(b.projectId);return sendJson(res,200,{ok:true,...openRuntime(b.projectId,project.localUrl||'')});}
+    if(u.pathname.startsWith('/api/projects/runtime/')&&req.method==='GET'){const id=decodeURIComponent(u.pathname.split('/').pop());return sendJson(res,200,{ok:true,runtime:runtimeStatus(id)});}
 
     if(u.pathname==='/api/dev/status'&&req.method==='GET')return sendJson(res,200,{ok:true,...await devStatus()});
     if(u.pathname==='/api/dev/command'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,result:await runConsole(b.projectId,b.command)});}
@@ -95,4 +98,4 @@ const server=http.createServer(async(req,res)=>{
 });
 server.on('clientError',(err,socket)=>{console.error('[HTTP]',err.message);socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');});
 process.on('uncaughtException',e=>console.error('[UNCAUGHT]',e));process.on('unhandledRejection',e=>console.error('[UNHANDLED]',e));
-server.listen(port,'127.0.0.1',()=>console.log(`RB Workspace Intelligence v1.2.0 · http://127.0.0.1:${port} · ${repoRoot}`));
+server.listen(port,'127.0.0.1',()=>console.log(`RB Workspace Intelligence v1.3.0 · http://127.0.0.1:${port} · ${repoRoot}`));
