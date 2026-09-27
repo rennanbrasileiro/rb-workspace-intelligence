@@ -1,0 +1,3 @@
+{
+  "id":"rb-workspace-intelligence","name":"RB Workspace Intelligence","type":"node-local-saas-agent","repository":"https://github.com/rennanbrasileiro/rb-workspace-intelligence.git","install":null,"build":"npm run check","dev":"npm run dev","start":"npm start","localUrl":"http://127.0.0.1:4310","port":4310,"requires":["git","node","code"]
+}

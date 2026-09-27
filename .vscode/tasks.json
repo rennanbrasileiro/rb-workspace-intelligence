@@ -1,0 +1,1 @@
+{"version":"2.0.0","tasks":[{"label":"RB: validar","type":"shell","command":"npm run check","group":"test"},{"label":"RB: Dev Hub","type":"shell","command":"npm run dev","isBackground":true,"problemMatcher":[]}]}
