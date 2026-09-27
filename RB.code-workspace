@@ -1,0 +1,18 @@
+{
+  "folders": [
+    { "name": "RB Workspace Intelligence + Dev Hub", "path": "." },
+    { "name": "MOLDÊ", "path": "../molde-3d-app" }
+  ],
+  "settings": {
+    "files.exclude": { "**/node_modules": true, "**/dist": true },
+    "terminal.integrated.cwd": "${workspaceFolder:RB Workspace Intelligence + Dev Hub}"
+  },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      { "label": "RB: iniciar Dev Hub", "type": "shell", "command": "npm run dev", "options": { "cwd": "${workspaceFolder:RB Workspace Intelligence + Dev Hub}" }, "isBackground": true },
+      { "label": "MOLDÊ: build", "type": "shell", "command": "npm run build", "options": { "cwd": "${workspaceFolder:MOLDÊ}" } },
+      { "label": "MOLDÊ: rodar", "type": "shell", "command": "npm run dev", "options": { "cwd": "${workspaceFolder:MOLDÊ}" }, "isBackground": true }
+    ]
+  }
+}
