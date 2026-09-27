@@ -2,35 +2,59 @@
 
 SaaS + agente local para inventariar, compreender e organizar arquivos e documentos com segurança, rastreabilidade e rollback.
 
-## Rodar localmente no Windows
+## Jeito mais fácil no Windows
 
-1. Instale Git, Node.js LTS e VS Code.
-2. Clone este repositório.
-3. Execute `START_RB_DEV_HUB.cmd`.
-4. O dashboard abre em `http://127.0.0.1:4310` e o Dev Hub em `http://127.0.0.1:4310/devhub/`.
+Baixe e execute `INSTALL_RB_DEV_HUB.cmd`.
 
-O **RB Dev Hub** é o ponto único para seus projetos locais. Ele verifica Git/Node/VS Code/Python e permite clonar/atualizar, abrir em uma nova janela do VS Code, instalar dependências, buildar, rodar e abrir no navegador. Cada projeto pode descrever seu próprio ciclo por `rb-project.json`, evitando um processo diferente para cada stack.
+Ele cria `%USERPROFILE%\RB\Projects`, clona/atualiza o RB Workspace Intelligence, abre `RB.code-workspace` no VS Code quando o comando `code` estiver disponível e inicia o Dev Hub em `http://127.0.0.1:4310/devhub/`.
 
-Projetos já cadastrados no Dev Hub:
+O Dev Hub passa a ser o ponto único para clonar/atualizar, abrir no VS Code, instalar dependências, buildar, rodar e abrir aplicações. Cada projeto declara seu próprio ciclo em `rb-project.json`, então o Hub não precisa conhecer previamente o stack.
+
+Projetos iniciais:
 
 - `rennanbrasileiro/rb-workspace-intelligence`
 - `rennanbrasileiro/molde-3d-app`
 
-## Visão do produto
+## Rodar depois de instalado
 
-O RB Workspace Intelligence conecta máquinas autorizadas a uma aplicação SaaS. Um agente local Windows inventaria apenas as pastas explicitamente autorizadas, extrai metadados e, quando permitido, conteúdo textual de documentos. O SaaS analisa esse inventário, identifica problemas de organização e propõe planos de reorganização antes de qualquer alteração no filesystem.
+Execute `START_RB_DEV_HUB.cmd` ou abra `RB.code-workspace` no VS Code.
+
+Dashboard: `http://127.0.0.1:4310`
+
+Dev Hub: `http://127.0.0.1:4310/devhub/`
+
+## Document Intelligence real
+
+O agente local possui extração somente leitura para:
+
+- TXT, Markdown, CSV, JSON, XML, HTML e arquivos de texto/código: nativo;
+- PDF: `pypdf`;
+- DOCX: `python-docx`;
+- XLSX: `openpyxl`;
+- PPTX: `python-pptx`.
+
+Para habilitar os extratores Office/PDF, execute `INSTALL_AGENT_DEPS.cmd` ou use o botão **Dependências** do projeto no Dev Hub. A leitura gera texto separado, SHA-256 e proveniência; o original não é sobrescrito.
 
 ## MVP local atual
 
-O MVP local já consegue inventariar, em modo somente leitura, uma pasta explicitamente informada dentro do perfil do usuário. Diretórios críticos de sistema são bloqueados e `.git`, `node_modules` e Lixeira não são percorridos. Nenhuma ação de mover, renomear ou apagar arquivo foi habilitada nesta etapa.
+O dashboard consegue:
+
+- inventariar uma pasta explicitamente autorizada dentro do perfil do usuário;
+- bloquear caminhos críticos de sistema;
+- ignorar `.git`, `node_modules`, Lixeira e `AppData` durante o inventário básico;
+- identificar nomes pouco claros por regras iniciais;
+- gerar uma proposta `BEFORE → AFTER` por ano e categoria para arquivos soltos;
+- ler documentos suportados em modo somente leitura.
+
+O plano é **preview apenas** neste estágio. Nenhum `MOVE_FILE`, `RENAME_FILE` ou exclusão é executado pelo dashboard atual.
 
 ## Princípios de segurança
 
 - Nunca apagar arquivos automaticamente.
 - O SaaS não recebe acesso arbitrário ao filesystem.
 - O agente executa somente operações tipadas e auditáveis.
-- Toda operação deve registrar estado anterior e posterior.
-- Usar hash quando disponível para validar integridade.
+- Toda operação futura deve registrar estado anterior e posterior.
+- Usar hash para validar integridade quando aplicável.
 - Permitir rollback de operações elegíveis.
 - Proteger por padrão diretórios críticos do sistema.
 - Preservar repositórios de código conforme política do Space.
@@ -45,16 +69,16 @@ O MVP local já consegue inventariar, em modo somente leitura, uma pasta explici
 - `QUARANTINE_FILE`
 - `RESTORE_OPERATION`
 
-## Arquitetura inicial
+## Arquitetura
 
 ```text
 Windows / arquivos locais
         ↓
 Local Agent
         ↓
-Inventário + extração autorizada
+Inventário + Document Intelligence autorizado
         ↓
-RB Workspace Intelligence SaaS
+RB Workspace Intelligence
         ↓
 Spaces + Policies + Findings
         ↓
@@ -69,46 +93,20 @@ Audit Log + rollback
 
 ## Spaces
 
-Cada organização pode manter contextos independentes, por exemplo:
-
-- RB Hub
-- Condomínio
-- Projetos
-- Pessoal
-
-Cada Space pode possuir regras próprias de estrutura, nomenclatura, ano/mês, tipos documentais, caminhos protegidos e futuramente regras de e-mail e armazenamento em nuvem.
-
-## Document Intelligence
-
-Formatos planejados para leitura e classificação:
-
-- PDF
-- DOCX
-- XLSX
-- PPTX
-- TXT
-- CSV
-- arquivos de texto e código
-
-O texto extraído deve ser armazenado separadamente do arquivo original, mantendo proveniência e referência ao documento-fonte. Imagens e documentos escaneados entram posteriormente por OCR opcional.
+A estrutura está preparada para contextos independentes como RB Hub, Condomínio, Projetos e Pessoal, cada um com políticas próprias de hierarquia, nomenclatura, ano/mês, documentos, caminhos protegidos e futuramente regras de e-mail/cloud.
 
 ## Roadmap
 
 1. MVP local + Dev Hub
-2. Agente Windows e pareamento máquina ↔ SaaS
-3. Inventário persistente de pastas autorizadas
-4. Leitura real de documentos
-5. Spaces, Policies e Findings
-6. Organization Plan BEFORE → AFTER
-7. Execução tipada e rollback
-8. Integrações de e-mail e cloud drives
-9. Busca semântica sobre documentos
-10. Integração com outros produtos RB
+2. Inventário persistente e máquina vinculada
+3. Spaces, Policies e classificação contextual
+4. Findings avançados, duplicidades e versões
+5. Organization Plan com aprovação granular
+6. Execução tipada + journal + rollback
+7. Integrações de e-mail e cloud drives
+8. Busca semântica sobre documentos
+9. Integração com outros produtos RB
 
-## Ambiente publicado
+## Ambiente hospedado
 
 Existe um ambiente web inicial de demonstração no Replit. O acesso real ao filesystem continua necessariamente no agente/processo local; uma página hospedada não recebe acesso livre ao disco do usuário.
-
-## Status
-
-Projeto em desenvolvimento. Dados apresentados em ambientes de demonstração devem ser claramente marcados como DEMO até que máquinas e fontes reais estejam conectadas.
