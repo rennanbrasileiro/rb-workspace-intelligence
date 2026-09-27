@@ -2,6 +2,7 @@ import {$,api,post,toast,esc,fmtDate,fmtBytes,setBusy} from './common.js';
 import {initFileOrganizer} from './files.js';
 import {initProjects,refreshProjects} from './projects.js';
 const v12=document.createElement('link');v12.rel='stylesheet';v12.href='/v12.css';document.head.appendChild(v12);
+const v16=document.createElement('link');v16.rel='stylesheet';v16.href='/v16.css';document.head.appendChild(v16);
 let state=null,currentDocText='';
 export function go(id){document.querySelectorAll('.page').forEach(x=>x.classList.toggle('active',x.id===id));document.querySelectorAll('.nav').forEach(x=>x.classList.toggle('active',x.dataset.section===id));$('pageTitle').textContent={overview:'Início',organize:'Organizar arquivos',projects:'Projetos locais',documents:'Inspecionar documento',history:'Histórico'}[id]||id;if(id==='history')renderTransactions();if(id==='projects')refreshProjects(null,n=>$('metricProjects').textContent=n);}
 document.querySelectorAll('.nav').forEach(b=>b.onclick=()=>go(b.dataset.section));document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
