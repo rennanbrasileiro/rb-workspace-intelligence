@@ -2,7 +2,6 @@
 setlocal EnableExtensions
 set "ROOT=%USERPROFILE%\RB\Projects"
 set "HUB=%ROOT%\rb-workspace-intelligence"
-set "MOLDE=%ROOT%\molde-3d-app"
 
 echo ==========================================================
 echo   RB DEV HUB - instalacao / atualizacao local
@@ -11,34 +10,22 @@ echo.
 
 where git >nul 2>nul || goto :missing_git
 where node >nul 2>nul || goto :missing_node
-
 if not exist "%ROOT%" mkdir "%ROOT%"
 
-echo [1/5] RB Workspace Intelligence...
+echo [1/3] RB Workspace Intelligence / Dev Hub...
 if exist "%HUB%\.git" (
   git -C "%HUB%" pull --ff-only || goto :fail
 ) else (
   git clone https://github.com/rennanbrasileiro/rb-workspace-intelligence.git "%HUB%" || goto :fail
 )
 
-echo [2/5] MOLDÊ...
-if exist "%MOLDE%\.git" (
-  git -C "%MOLDE%" pull --ff-only || echo [AVISO] Nao foi possivel atualizar o MOLDÊ agora.
-) else (
-  git clone https://github.com/rennanbrasileiro/molde-3d-app.git "%MOLDE%" || echo [AVISO] MOLDÊ e privado. Autentique o GitHub e use o botao Clonar no Dev Hub.
-)
+echo [2/3] Editor...
+where cursor >nul 2>nul && start "" cursor -n "%HUB%" && goto :editor_done
+where code >nul 2>nul && start "" code -n "%HUB%" && goto :editor_done
+echo [AVISO] Cursor/VS Code nao detectado no PATH. O Hub funcionara mesmo assim.
+:editor_done
 
-echo [3/5] Validando MOLDÊ quando disponivel...
-if exist "%MOLDE%\package.json" (
-  pushd "%MOLDE%"
-  call npm run build || (popd & echo [ERRO] O build lacrado do MOLDÊ falhou. Nenhuma versao foi executada.& pause & exit /b 1)
-  popd
-)
-
-echo [4/5] Preparando VS Code...
-where code >nul 2>nul && start "" code -n "%HUB%\RB.code-workspace"
-
-echo [5/5] Iniciando RB Dev Hub...
+echo [3/3] Iniciando RB Dev Hub...
 cd /d "%HUB%"
 start "RB Dev Hub" cmd /k "npm run dev"
 timeout /t 2 /nobreak >nul
