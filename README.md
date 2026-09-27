@@ -1,112 +1,48 @@
 # RB Workspace Intelligence
 
-SaaS + agente local para inventariar, compreender e organizar arquivos e documentos com segurança, rastreabilidade e rollback.
+Aplicação **local-first** para inventariar, compreender, organizar e rastrear arquivos e documentos sem entregar controle arbitrário do computador a um SaaS.
 
-## Jeito mais fácil no Windows
+## Instalação única no Windows
 
-Baixe e execute `INSTALL_RB_DEV_HUB.cmd`.
+Execute `INSTALL_RB_WORKSPACE.cmd`. O instalador:
 
-Ele cria `%USERPROFILE%\RB\Projects`, clona/atualiza o RB Workspace Intelligence, abre `RB.code-workspace` no VS Code quando o comando `code` estiver disponível e inicia o Dev Hub em `http://127.0.0.1:4310/devhub/`.
+1. verifica Git, Node.js e Python;
+2. usa `winget` para instalar pré-requisitos ausentes quando disponível;
+3. clona/atualiza este repositório em `%USERPROFILE%\RB\Projects\rb-workspace-intelligence`;
+4. valida o código;
+5. instala leitores de PDF/DOCX/XLSX/PPTX;
+6. cria atalhos no Desktop e Menu Iniciar;
+7. abre `http://127.0.0.1:4310/`.
 
-O Dev Hub passa a ser o ponto único para clonar/atualizar, abrir no VS Code, instalar dependências, buildar, rodar e abrir aplicações. Cada projeto declara seu próprio ciclo em `rb-project.json`, então o Hub não precisa conhecer previamente o stack.
+Depois disso, atualizações normais são feitas na **Dev Console**: Verificar GitHub → `git pull` → Reiniciar aplicação.
 
-Projetos iniciais:
+## Produtos separados
 
-- `rennanbrasileiro/rb-workspace-intelligence`
-- `rennanbrasileiro/molde-3d-app`
+- `/` — **Workspace Intelligence**: Spaces, inventário, análise, BEFORE → AFTER, execução segura, histórico, rollback e Document Intelligence.
+- `/devhub/` — **Dev Console / Project Launcher**: Git, build, execução, Cursor/VS Code e aprendizado. Ela gerencia projetos, mas não mistura seus códigos.
+- MOLDÊ continua em `rennanbrasileiro/molde-3d-app` e só aparece como projeto independente no Launcher.
 
-## Rodar depois de instalado
+## Garantias de segurança da v1.0
 
-Execute `START_RB_DEV_HUB.cmd` ou abra `RB.code-workspace` no VS Code.
+- opera apenas dentro do perfil do usuário;
+- bloqueia diretórios críticos do Windows;
+- ignora `.git`, `node_modules`, AppData e artefatos de build no inventário;
+- nunca apaga automaticamente;
+- duplicados vão apenas para quarentena, com aprovação explícita;
+- nunca sobrescreve arquivo de destino;
+- registra hash antes/depois das movimentações;
+- rollback é bloqueado se o arquivo tiver sido alterado após a operação;
+- leitura de documentos preserva o original e registra proveniência.
 
-Dashboard: `http://127.0.0.1:4310`
+## Formatos de documento
 
-Dev Hub: `http://127.0.0.1:4310/devhub/`
+PDF, DOCX, XLSX, PPTX, TXT, CSV, JSON, XML, Markdown e arquivos comuns de texto/código. OCR de documentos escaneados fica para uma evolução posterior.
 
-## Document Intelligence real
+## Desenvolvimento
 
-O agente local possui extração somente leitura para:
-
-- TXT, Markdown, CSV, JSON, XML, HTML e arquivos de texto/código: nativo;
-- PDF: `pypdf`;
-- DOCX: `python-docx`;
-- XLSX: `openpyxl`;
-- PPTX: `python-pptx`.
-
-Para habilitar os extratores Office/PDF, execute `INSTALL_AGENT_DEPS.cmd` ou use o botão **Dependências** do projeto no Dev Hub. A leitura gera texto separado, SHA-256 e proveniência; o original não é sobrescrito.
-
-## MVP local atual
-
-O dashboard consegue:
-
-- inventariar uma pasta explicitamente autorizada dentro do perfil do usuário;
-- bloquear caminhos críticos de sistema;
-- ignorar `.git`, `node_modules`, Lixeira e `AppData` durante o inventário básico;
-- identificar nomes pouco claros por regras iniciais;
-- gerar uma proposta `BEFORE → AFTER` por ano e categoria para arquivos soltos;
-- ler documentos suportados em modo somente leitura.
-
-O plano é **preview apenas** neste estágio. Nenhum `MOVE_FILE`, `RENAME_FILE` ou exclusão é executado pelo dashboard atual.
-
-## Princípios de segurança
-
-- Nunca apagar arquivos automaticamente.
-- O SaaS não recebe acesso arbitrário ao filesystem.
-- O agente executa somente operações tipadas e auditáveis.
-- Toda operação futura deve registrar estado anterior e posterior.
-- Usar hash para validar integridade quando aplicável.
-- Permitir rollback de operações elegíveis.
-- Proteger por padrão diretórios críticos do sistema.
-- Preservar repositórios de código conforme política do Space.
-- Nunca sobrescrever o conteúdo original durante extração de documentos.
-
-## Operações previstas do agente
-
-- `CREATE_DIRECTORY`
-- `MOVE_FILE`
-- `RENAME_FILE`
-- `COPY_FILE`
-- `QUARANTINE_FILE`
-- `RESTORE_OPERATION`
-
-## Arquitetura
-
-```text
-Windows / arquivos locais
-        ↓
-Local Agent
-        ↓
-Inventário + Document Intelligence autorizado
-        ↓
-RB Workspace Intelligence
-        ↓
-Spaces + Policies + Findings
-        ↓
-Organization Plan (BEFORE → AFTER)
-        ↓
-Aprovação humana
-        ↓
-Operações tipadas no agente
-        ↓
-Audit Log + rollback
+```bash
+npm run build
+npm run dev
 ```
 
-## Spaces
-
-A estrutura está preparada para contextos independentes como RB Hub, Condomínio, Projetos e Pessoal, cada um com políticas próprias de hierarquia, nomenclatura, ano/mês, documentos, caminhos protegidos e futuramente regras de e-mail/cloud.
-
-## Roadmap
-
-1. MVP local + Dev Hub
-2. Inventário persistente e máquina vinculada
-3. Spaces, Policies e classificação contextual
-4. Findings avançados, duplicidades e versões
-5. Organization Plan com aprovação granular
-6. Execução tipada + journal + rollback
-7. Integrações de e-mail e cloud drives
-8. Busca semântica sobre documentos
-9. Integração com outros produtos RB
-
-## Ambiente hospedado
-
-Existe um ambiente web inicial de demonstração no Replit. O acesso real ao filesystem continua necessariamente no agente/processo local; uma página hospedada não recebe acesso livre ao disco do usuário.
+A aplicação não possui dependências NPM externas no núcleo. Leitores de documentos usam `requirements.txt`.

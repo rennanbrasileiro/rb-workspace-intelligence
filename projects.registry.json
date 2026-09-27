@@ -1,20 +1,6 @@
 {
-  "projects": [
-    {
-      "id": "rb-workspace-intelligence",
-      "name": "RB Workspace Intelligence",
-      "repository": "https://github.com/rennanbrasileiro/rb-workspace-intelligence.git",
-      "directory": "rb-workspace-intelligence",
-      "fallbackUrl": "http://127.0.0.1:4310",
-      "role": "workspace-product"
-    },
-    {
-      "id": "molde-3d-app",
-      "name": "MOLDÊ",
-      "repository": "https://github.com/rennanbrasileiro/molde-3d-app.git",
-      "directory": "molde-3d-app",
-      "fallbackUrl": "http://127.0.0.1:4317",
-      "role": "independent-app"
-    }
+  "projects":[
+    {"id":"rb-workspace-intelligence","name":"RB Workspace Intelligence","repository":"https://github.com/rennanbrasileiro/rb-workspace-intelligence.git","directory":"rb-workspace-intelligence","fallbackUrl":"http://127.0.0.1:4310","role":"current"},
+    {"id":"molde-3d-app","name":"MOLDÊ","repository":"https://github.com/rennanbrasileiro/molde-3d-app.git","directory":"molde-3d-app","fallbackUrl":"http://127.0.0.1:4317","role":"independent-app"}
   ]
 }
