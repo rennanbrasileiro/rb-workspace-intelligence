@@ -68,6 +68,7 @@ export async function removeSpace(spaceId){
 
 export async function saveScan(scan){ return mutate((state)=>{ state.scans.unshift(scan); state.scans = state.scans.slice(0,20); return scan; }); }
 export async function savePlan(plan){ return mutate((state)=>{ state.plans.unshift(plan); state.plans = state.plans.slice(0,30); return plan; }); }
+export async function replacePlan(plan){ return mutate((state)=>{ const i=state.plans.findIndex(p=>p.id===plan.id); if(i<0) throw new Error('Plano não encontrado para atualização.'); state.plans[i]=plan; return plan; }); }
 export async function saveTransaction(tx){ return mutate((state)=>{ state.transactions.unshift(tx); state.transactions = state.transactions.slice(0,100); return tx; }); }
 export async function updateTransaction(txId, patch){ return mutate((state)=>{ const tx=state.transactions.find(t=>t.id===txId); if(!tx) throw new Error('Transação não encontrada.'); Object.assign(tx, patch, { updatedAt:now() }); return tx; }); }
 
