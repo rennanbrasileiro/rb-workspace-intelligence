@@ -6,7 +6,7 @@
   "scripts":{
     "start":"node server.mjs",
     "dev":"node server.mjs",
-    "check":"node --check server.mjs && node --check core/storage.mjs && node --check core/workspace.mjs && node --check core/dev.mjs && node --check app/app.js && node --check devhub/dev.js",
+    "check":"node --check server.mjs && node --check core/storage.mjs && node --check core/workspace.mjs && node --check core/dev.mjs && node --check core/projects.mjs && node --check app/v11/common.js && node --check app/v11/files.js && node --check app/v11/projects.js && node --check app/v11/main.js && node --check devhub/dev.js",
     "build":"npm run check"
   }
 }
