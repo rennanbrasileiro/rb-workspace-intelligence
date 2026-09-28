@@ -17,7 +17,7 @@ import { startExecutionJob, executionJobStatus, cancelExecutionJob } from './cor
 
 const root=path.dirname(fileURLToPath(import.meta.url));
 const port=Number(process.env.PORT||4310);
-const version='1.7.0';
+const version='1.7.1';
 await ensureState();
 function sendJson(res,status,data){res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data));}
 async function body(req){let b='';for await(const c of req){b+=c;if(b.length>2_000_000)throw new Error('Payload muito grande.');}return b?JSON.parse(b):{};}
