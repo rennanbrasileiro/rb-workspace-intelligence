@@ -14,13 +14,14 @@ function referenceRisk(operation){const ext=path.extname(operation.before||opera
 function safeFilename(input,expectedExt){const name=String(input||'').trim();if(!name||name==='.'||name==='..')throw new Error('Informe um nome de arquivo válido.');if(path.basename(name)!==name||/[<>:"/\\|?*\u0000-\u001f]/.test(name)||RESERVED.test(name))throw new Error('O nome contém caracteres ou um identificador reservado pelo Windows.');const ext=path.extname(name).toLowerCase();if(expectedExt&&ext!==expectedExt.toLowerCase())throw new Error(`A extensão deve permanecer ${expectedExt}. Renomeie apenas o arquivo, sem alterar o tipo.`);return name.slice(0,220);}
 function reviewSnapshot(op){return{after:op.after,type:op.type,preserveSource:Boolean(op.preserveSource),recommended:Boolean(op.recommended),reviewExcluded:Boolean(op.reviewExcluded)};}
 function documentInfo(plan,source){const docs=plan.documentIntelligence?.documents||[];const target=path.resolve(source);return docs.find(d=>{try{return path.resolve(d.path)===target}catch{return false}})||null;}
-function publicOperation(op){return{id:op.id,type:op.type,before:op.before,after:op.after,reason:op.reason||'',confidence:op.confidence||'',recommended:Boolean(op.recommended),area:op.area||'Outros',family:op.family||'',subject:op.subject||'Geral',subtopic:op.subtopic||'',category:op.category||'',referenceRisk:referenceRisk(op),reviewEdited:Boolean(op.reviewEdited),reviewExcluded:Boolean(op.reviewExcluded)};}
+function publicOperation(op){return{id:op.id,type:op.type,before:op.before,after:op.after,reason:op.reason||'',confidence:op.confidence||'',recommended:Boolean(op.recommended),area:op.area||'Outros',family:op.family||'',subject:op.subject||'Geral',subtopic:op.subtopic||'',category:op.category||'',referenceRisk:referenceRisk(op),reviewEdited:Boolean(op.reviewEdited),reviewExcluded:Boolean(op.reviewExcluded),reviewQuarantined:op.type==='QUARANTINE_FILE'};}
+function pushHistory(operation,before,note){operation.reviewedAt=now();operation.reviewHistory=[...(operation.reviewHistory||[]),{at:operation.reviewedAt,before,after:reviewSnapshot(operation),note:String(note||'Ajuste manual').slice(0,300)}].slice(-30);}
 
 export async function getOperationReview(opId){
   const state=await readState(),{plan,operation}=locate(state,opId),source=assertAllowedPath(operation.before),s=await stat(source).catch(()=>null),doc=documentInfo(plan,source);
   return{
     planId:plan.id,
-    operation:{...operation,referenceRisk:referenceRisk(operation)},
+    operation:{...operation,referenceRisk:referenceRisk(operation),reviewQuarantined:operation.type==='QUARANTINE_FILE'},
     source:{path:source,name:path.basename(source),ext:path.extname(source).toLowerCase(),exists:Boolean(s?.isFile()),size:s?.size??null,modifiedAt:s?.mtime?.toISOString?.()||null},
     document:doc?{name:doc.name||path.basename(source),topic:doc.topic||'',bucket:doc.bucket||'',area:doc.area||'',summary:doc.summary||'',method:doc.method||'',complete:doc.complete!==false,textLength:doc.textLength||0,error:doc.error||''}:null,
     trace:{original:operation.reviewOriginal||reviewSnapshot(operation),history:operation.reviewHistory||[],edited:Boolean(operation.reviewEdited)}
@@ -45,17 +46,26 @@ export async function updateOperationReview(opId,input={}){
     operation.after=target;
     if(input.excluded!==undefined)operation.reviewExcluded=Boolean(input.excluded);
     operation.reviewEdited=true;
-    operation.reviewedAt=now();
-    operation.reviewHistory=[...(operation.reviewHistory||[]),{at:operation.reviewedAt,before,after:reviewSnapshot(operation),note:String(input.note||'Ajuste manual de destino').slice(0,300)}].slice(-30);
+    pushHistory(operation,before,input.note||'Ajuste manual de destino');
     plan.updatedAt=now();
-    return{planId:plan.id,operation:{...operation,referenceRisk:referenceRisk(operation)}};
+    return{planId:plan.id,operation:{...operation,referenceRisk:referenceRisk(operation),reviewQuarantined:operation.type==='QUARANTINE_FILE'}};
+  });
+}
+
+export async function quarantineOperationReview(opId){
+  return mutate((state)=>{
+    const {plan,operation}=locate(state,opId);if(!operation.reviewOriginal)operation.reviewOriginal=reviewSnapshot(operation);
+    const before=reviewSnapshot(operation),stamp=new Date().toISOString().slice(0,7),target=assertAllowedPath(path.join(home,'_RB_Quarantine','Revisao',stamp,path.basename(operation.before)));
+    operation.type='QUARANTINE_FILE';operation.after=target;operation.reviewExcluded=false;operation.reviewEdited=true;operation.reason=`Quarentena solicitada na revisão · origem preservada por checkpoint antes da execução`;
+    pushHistory(operation,before,'Marcado para quarentena segura');plan.updatedAt=now();
+    return{planId:plan.id,operation:{...operation,referenceRisk:referenceRisk(operation),reviewQuarantined:true}};
   });
 }
 
 export async function resetOperationReview(opId){
   return mutate((state)=>{
-    const {plan,operation}=locate(state,opId),original=operation.reviewOriginal;if(!original)return{planId:plan.id,operation:{...operation,referenceRisk:referenceRisk(operation)}};
-    const before=reviewSnapshot(operation);operation.after=original.after;operation.type=original.type;operation.preserveSource=original.preserveSource;operation.recommended=original.recommended;operation.reviewExcluded=Boolean(original.reviewExcluded);operation.reviewEdited=false;operation.reviewedAt=now();operation.reviewHistory=[...(operation.reviewHistory||[]),{at:operation.reviewedAt,before,after:reviewSnapshot(operation),note:'Sugestão automática restaurada'}].slice(-30);plan.updatedAt=now();return{planId:plan.id,operation:{...operation,referenceRisk:referenceRisk(operation)}};
+    const {plan,operation}=locate(state,opId),original=operation.reviewOriginal;if(!original)return{planId:plan.id,operation:{...operation,referenceRisk:referenceRisk(operation),reviewQuarantined:operation.type==='QUARANTINE_FILE'}};
+    const before=reviewSnapshot(operation);operation.after=original.after;operation.type=original.type;operation.preserveSource=original.preserveSource;operation.recommended=original.recommended;operation.reviewExcluded=Boolean(original.reviewExcluded);operation.reviewEdited=false;pushHistory(operation,before,'Sugestão automática restaurada');plan.updatedAt=now();return{planId:plan.id,operation:{...operation,referenceRisk:referenceRisk(operation),reviewQuarantined:operation.type==='QUARANTINE_FILE'}};
   });
 }
 
@@ -69,4 +79,4 @@ export async function selectionReferenceProtection(planId,operationIds=[]){
   return{count:risky.length,required:risky.length>0,forcedRetentionMode:risky.length?'preserve_original':null,items:risky.slice(0,20).map(o=>({id:o.id,path:o.before,target:o.after,ext:path.extname(o.before||'').toLowerCase()}))};
 }
 
-export function reviewSafetySummary(){return{referenceExtensions:[...REFERENCE_EXTS],referencePolicy:'preserve_original',home};}
+export function reviewSafetySummary(){return{referenceExtensions:[...REFERENCE_EXTS],referencePolicy:'preserve_original',quarantineRoot:path.join(home,'_RB_Quarantine','Revisao'),hardDeleteAvailable:false,home};}
