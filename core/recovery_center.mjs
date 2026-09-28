@@ -58,8 +58,7 @@ export async function listRecoveryCheckpoints(){
 
 export async function getRecoveryCheckpoint(checkpointId){
   const p=path.join(checkpointsRoot,path.basename(String(checkpointId||'')),'manifest.json');
-  const m=JSON.parse(await readFile(p,'utf8'));
-  return m;
+  return JSON.parse(await readFile(p,'utf8'));
 }
 
 export async function restoreRecoveryCheckpoint(checkpointId,{dryRun=true}={}){
@@ -68,12 +67,24 @@ export async function restoreRecoveryCheckpoint(checkpointId,{dryRun=true}={}){
   for(const e of m.entries||[]){
     const original=assertAllowedPath(e.original),backup=assertAllowedPath(e.backup);
     if(!(await exists(backup))){results.push({original,status:'backup_missing'});continue;}
-    if(await exists(original)){results.push({original,status:'original_exists'});continue;}
-    const currentHash=await hashFile(backup).catch(()=>null);if(e.sha256&&currentHash&&currentHash!==e.sha256){results.push({original,status:'backup_changed'});continue;}
-    if(!dryRun){await mkdir(path.dirname(original),{recursive:true});await copyFile(backup,original);}
+    const backupHash=await hashFile(backup).catch(()=>null);
+    if(e.sha256&&(!backupHash||backupHash!==e.sha256)){results.push({original,status:'backup_changed',backupHash});continue;}
+    if(await exists(original)){
+      const originalHash=await hashFile(original).catch(()=>null);
+      if(e.sha256&&originalHash===e.sha256)results.push({original,status:'original_matches_checkpoint',originalHash});
+      else if(e.sha256&&originalHash)results.push({original,status:'original_changed',originalHash,checkpointHash:e.sha256});
+      else results.push({original,status:'original_exists_unverified',originalHash});
+      continue;
+    }
+    if(!dryRun){
+      await mkdir(path.dirname(original),{recursive:true});await copyFile(backup,original);
+      const restoredHash=await hashFile(original).catch(()=>null);
+      if(e.sha256&&restoredHash!==e.sha256){try{await import('node:fs/promises').then(fs=>fs.rm(original,{force:true}))}catch{}results.push({original,status:'restore_integrity_failed',restoredHash,checkpointHash:e.sha256});continue;}
+    }
     results.push({original,status:dryRun?'would_restore':'restored'});
   }
-  const summary={total:results.length,wouldRestore:results.filter(x=>x.status==='would_restore').length,restored:results.filter(x=>x.status==='restored').length,originalExists:results.filter(x=>x.status==='original_exists').length,backupMissing:results.filter(x=>x.status==='backup_missing').length,backupChanged:results.filter(x=>x.status==='backup_changed').length};
+  const count=s=>results.filter(x=>x.status===s).length;
+  const summary={total:results.length,wouldRestore:count('would_restore'),restored:count('restored'),originalMatchesCheckpoint:count('original_matches_checkpoint'),originalChanged:count('original_changed'),originalExistsUnverified:count('original_exists_unverified'),backupMissing:count('backup_missing'),backupChanged:count('backup_changed'),restoreIntegrityFailed:count('restore_integrity_failed')};
   return{checkpoint:{id:m.id,createdAt:m.createdAt,totalFiles:m.totalFiles,totalBytes:m.totalBytes},dryRun,summary,results};
 }
 
