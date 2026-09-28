@@ -36,6 +36,7 @@ try{
   assert.equal(typeof filterReviewedSelection,'function');
   assert.equal(typeof selectionReferenceProtection,'function');
   assert.equal(reviewSafetySummary().hardDeleteAvailable,false);
+  assert.equal(reviewSafetySummary().pendingExecutionRequiresExplicitApproval,true);
 
   assert.throws(()=>validateOrganizerScope(os.homedir()),/bloqueado por padrão/i);
   const advanced=validateOrganizerScope(os.homedir(),{allowProfileRoot:true});
@@ -47,9 +48,12 @@ try{
 
   const server=await readFile(new URL('../server.mjs',import.meta.url),'utf8');
   const organizerUi=await readFile(new URL('../app/v11/files.js',import.meta.url),'utf8');
+  const commonUi=await readFile(new URL('../app/v11/common.js',import.meta.url),'utf8');
   const reviewUi=await readFile(new URL('../app/v11/review.js',import.meta.url),'utf8');
+  const guardUi=await readFile(new URL('../app/v11/execution-review-guard.js',import.meta.url),'utf8');
   const mainUi=await readFile(new URL('../app/v11/main.js',import.meta.url),'utf8');
   const reviewCss=await readFile(new URL('../app/review.css',import.meta.url),'utf8');
+  const guardCss=await readFile(new URL('../app/execution-review-guard.css',import.meta.url),'utf8');
   const historyCss=await readFile(new URL('../app/history-trace.css',import.meta.url),'utf8');
   const recoveryUi=await readFile(new URL('../app/v11/recovery.js',import.meta.url),'utf8');
   const launcher=await readFile(new URL('../tools/RB_WORKSPACE_LATEST.ps1',import.meta.url),'utf8');
@@ -67,6 +71,10 @@ try{
   assert.match(server,/persistentReviewExclusions:true/);
   assert.match(server,/safeQuarantine:true/);
   assert.match(server,/hardDeleteAvailable:false/);
+  assert.match(server,/pendingExecutionRequiresExplicitApproval:true/);
+  assert.match(server,/requiresPendingApproval/);
+  assert.match(server,/b\.allowPending!==true/);
+  assert.match(server,/allowPendingAccepted/);
   assert.match(server,/\/api\/review\/latest-plan/);
   assert.match(server,/\/api\/review\/operations\//);
   assert.match(server,/\/api\/review\/open/);
@@ -82,6 +90,8 @@ try{
   assert.match(organizerUi,/REVISÃO DE SEGURANÇA/);
   assert.match(organizerUi,/preserve_original/);
   assert.match(organizerUi,/Centro de Recuperação/);
+  assert.match(commonUi,/__rbAllowPendingExecution/);
+  assert.match(commonUi,/allowPending:true/);
   assert.match(reviewUi,/REVISÃO DO ITEM/);
   assert.match(reviewUi,/Revisar item a item/);
   assert.match(reviewUi,/Salvar ajuste/);
@@ -91,13 +101,20 @@ try{
   assert.match(reviewUi,/referência protegida/);
   assert.match(reviewUi,/api\/review\/operations/);
   assert.match(reviewUi,/api\/review\/open/);
+  assert.match(guardUi,/allowPendingExecution/);
+  assert.match(guardUi,/Revisar pendentes/);
+  assert.match(guardUi,/Executar mesmo assim/);
+  assert.match(guardUi,/__rbAllowPendingExecution=false/);
   assert.match(mainUi,/initReviewExperience/);
+  assert.match(mainUi,/initExecutionReviewGuard/);
   assert.match(mainUi,/review\.css/);
+  assert.match(mainUi,/execution-review-guard\.css/);
   assert.match(mainUi,/history-trace\.css/);
   assert.match(mainUi,/Mapa origem → destino/);
   assert.match(mainUi,/Buscar arquivo, origem ou destino/);
   assert.match(mainUi,/data-trace-action="open"/);
   assert.match(reviewCss,/review-quarantine-badge/);
+  assert.match(guardCss,/pending-review-guard/);
   assert.match(historyCss,/trace-path-grid/);
   assert.match(historyCss,/history-trace-toolbar/);
   assert.match(recoveryUi,/backup_changed/);
@@ -116,7 +133,7 @@ try{
   assert.doesNotMatch(rootInstaller,/START_RB_WORKSPACE\.cmd/);
   assert.match(rootInstaller,/BOOTSTRAP_RB_WORKSPACE\.ps1/);
 
-  console.log('Release contract OK · v1.10 · review queue · safe quarantine · traceable history · reference preservation · safe rollback · Recovery Center · legacy engines retired · profile guard · offline launcher');
+  console.log('Release contract OK · v1.10 · review queue · explicit pending consent · safe quarantine · traceable history · reference preservation · safe rollback · Recovery Center · legacy engines retired · profile guard · offline launcher');
 } finally {
   await rm(root,{recursive:true,force:true});
   await rm(data,{recursive:true,force:true});
