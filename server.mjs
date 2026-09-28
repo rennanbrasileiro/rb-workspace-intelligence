@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { ensureState, readState, upsertSpace, removeSpace, replacePlan } from './core/storage.mjs';
 import { scanFolder, analyzeScan, commonFolders, getWorkspaceSummary, assertAllowedPath } from './core/workspace.mjs';
 import { rollbackTransactionSafe } from './core/rollback_safe.mjs';
-import { getOperationReview, updateOperationReview, resetOperationReview, selectionReferenceProtection, reviewSafetySummary } from './core/plan_review.mjs';
+import { getOperationReview, getLatestReviewPlan, updateOperationReview, resetOperationReview, filterReviewedSelection, selectionReferenceProtection, reviewSafetySummary } from './core/plan_review.mjs';
 import { devStatus, runConsole, projectAction, checkUpdate, pullUpdate, restartApp, addProject, repoRoot } from './core/dev.mjs';
 import { listLocalProjects, inspectLocalProject, cloneLocalProject, addExistingProject, createEmptyProject, localProjectAction, localGit, localConsole } from './core/projects.mjs';
 import { indexFolderDocuments, enrichPlanWithDocuments } from './core/documents.mjs';
@@ -45,12 +45,13 @@ function revealPath(input){const resolved=assertAllowedPath(input);if(process.pl
 
 const server=http.createServer(async(req,res)=>{try{
   const u=new URL(req.url,'http://127.0.0.1');
-  if(u.pathname==='/api/system'&&req.method==='GET'){const ws=await getWorkspaceSummary(),state=await readState();return sendJson(res,200,{ok:true,version,buildCommit,machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,safety:{physicalCheckpointRequired:true,legacyExecuteBlocked:true,recoveryCenter:true,transferStrategy:'copy_verify_commit',safeRollback:true,fullProfileAnalysisBlockedByDefault:true,executionPreflight:true,interactivePlanReview:true,externalReferencePreservation:true},reviewSafety:reviewSafetySummary(),...ws});}
+  if(u.pathname==='/api/system'&&req.method==='GET'){const ws=await getWorkspaceSummary(),state=await readState();return sendJson(res,200,{ok:true,version,buildCommit,machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,safety:{physicalCheckpointRequired:true,legacyExecuteBlocked:true,recoveryCenter:true,transferStrategy:'copy_verify_commit',safeRollback:true,fullProfileAnalysisBlockedByDefault:true,executionPreflight:true,interactivePlanReview:true,externalReferencePreservation:true,persistentReviewExclusions:true},reviewSafety:reviewSafetySummary(),...ws});}
   if(u.pathname==='/api/spaces'&&req.method==='POST')return sendJson(res,200,{ok:true,space:await upsertSpace(await body(req))});
   if(u.pathname.startsWith('/api/spaces/')&&req.method==='DELETE')return sendJson(res,200,{ok:true,removed:await removeSpace(decodeURIComponent(u.pathname.split('/').pop()))});
   if(u.pathname==='/api/pick/folder'&&req.method==='POST')return sendJson(res,200,{ok:true,path:powershellDialog('folder')});
   if(u.pathname==='/api/pick/file'&&req.method==='POST')return sendJson(res,200,{ok:true,path:powershellDialog('file')});
 
+  if(u.pathname==='/api/review/latest-plan'&&req.method==='GET')return sendJson(res,200,{ok:true,plan:await getLatestReviewPlan()});
   if(u.pathname==='/api/review/reveal'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,path:revealPath(b.path)});}
   if(u.pathname.startsWith('/api/review/operations/')&&u.pathname.endsWith('/reset')&&req.method==='POST'){const opId=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,review:await resetOperationReview(opId)});}
   if(u.pathname.startsWith('/api/review/operations/')&&req.method==='GET'){const opId=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,review:await getOperationReview(opId)});}
@@ -60,8 +61,8 @@ const server=http.createServer(async(req,res)=>{try{
   if(u.pathname.startsWith('/api/organizer/jobs/')&&u.pathname.endsWith('/cancel')&&req.method==='POST'){const id=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,job:cancelOrganizerJob(id)});}
   if(u.pathname.startsWith('/api/organizer/jobs/')&&req.method==='GET'){const id=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,job:organizerJobStatus(id)});}
 
-  if(u.pathname==='/api/execution/preflight'&&req.method==='POST'){const b=await body(req),preflight=await executionPreflight({planId:b.planId,operationIds:b.operationIds}),referenceProtection=await selectionReferenceProtection(b.planId,b.operationIds);preflight.referenceProtection=referenceProtection;return sendJson(res,200,{ok:true,preflight});}
-  if(u.pathname==='/api/execution/jobs'&&req.method==='POST'){const b=await body(req),referenceProtection=await selectionReferenceProtection(b.planId,b.operationIds),retentionMode=referenceProtection.required?'preserve_original':(b.retentionMode||'remove_after_verified_copy');return sendJson(res,200,{ok:true,referenceProtection,job:startExecutionJob({planId:b.planId,operationIds:b.operationIds,retentionMode})});}
+  if(u.pathname==='/api/execution/preflight'&&req.method==='POST'){const b=await body(req),reviewSelection=await filterReviewedSelection(b.planId,b.operationIds);if(!reviewSelection.operationIds.length)throw new Error('Todos os itens selecionados foram marcados como “não mover”. Revise a seleção antes de aplicar.');const preflight=await executionPreflight({planId:b.planId,operationIds:reviewSelection.operationIds}),referenceProtection=await selectionReferenceProtection(b.planId,reviewSelection.operationIds);preflight.referenceProtection=referenceProtection;preflight.reviewSelection=reviewSelection;return sendJson(res,200,{ok:true,preflight});}
+  if(u.pathname==='/api/execution/jobs'&&req.method==='POST'){const b=await body(req),reviewSelection=await filterReviewedSelection(b.planId,b.operationIds);if(!reviewSelection.operationIds.length)throw new Error('Nenhum item ativo restou após a revisão.');const referenceProtection=await selectionReferenceProtection(b.planId,reviewSelection.operationIds),retentionMode=referenceProtection.required?'preserve_original':(b.retentionMode||'remove_after_verified_copy');return sendJson(res,200,{ok:true,referenceProtection,reviewSelection,job:startExecutionJob({planId:b.planId,operationIds:reviewSelection.operationIds,retentionMode})});}
   if(u.pathname.startsWith('/api/execution/jobs/')&&u.pathname.endsWith('/cancel')&&req.method==='POST'){const id=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,job:cancelExecutionJob(id)});}
   if(u.pathname.startsWith('/api/execution/jobs/')&&req.method==='GET'){const id=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,job:executionJobStatus(id)});}
 
@@ -93,7 +94,7 @@ const server=http.createServer(async(req,res)=>{try{
   if(u.pathname==='/api/projects/runtime/open'&&req.method==='POST'){const b=await body(req),project=await projectWithTree(b.projectId);return sendJson(res,200,{ok:true,...openRuntime(b.projectId,project.localUrl||'')});}
   if(u.pathname.startsWith('/api/projects/runtime/')&&req.method==='GET'){const id=decodeURIComponent(u.pathname.split('/').pop());return sendJson(res,200,{ok:true,runtime:runtimeStatus(id)});}
 
-  if(u.pathname==='/api/dev/status'&&req.method==='GET')return sendJson(res,200,{ok:true,...await devStatus()});
+  if(u.pathname==='/api/dev/status'&&req.method==='GET'){return sendJson(res,200,{ok:true,...await devStatus()});}
   if(u.pathname==='/api/dev/command'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,result:await runConsole(b.projectId,b.command)});}
   if(u.pathname==='/api/dev/project'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,message:await projectAction(b.projectId,b.action)});}
   if(u.pathname==='/api/dev/projects'&&req.method==='POST')return sendJson(res,200,{ok:true,project:await addProject(await body(req))});
