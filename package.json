@@ -1,12 +1,12 @@
 {
   "name":"rb-workspace-intelligence",
-  "version":"1.6.0",
+  "version":"1.7.0",
   "private":true,
   "type":"module",
   "scripts":{
     "start":"node server.mjs",
     "dev":"node server.mjs",
-    "check":"node --check server.mjs && node --check core/storage.mjs && node --check core/workspace.mjs && node --check core/dev.mjs && node --check core/projects.mjs && node --check core/documents.mjs && node --check core/organizer_jobs.mjs && node --check core/execution_jobs.mjs && node --check core/github_local.mjs && node --check core/project_tree.mjs && node --check core/runtime.mjs && node --check app/v11/common.js && node --check app/v11/files.js && node --check app/v11/projects.js && node --check app/v11/main.js && node --check devhub/dev.js",
+    "check":"node --check server.mjs && node --check core/storage.mjs && node --check core/workspace.mjs && node --check core/dev.mjs && node --check core/projects.mjs && node --check core/documents.mjs && node --check core/families.mjs && node --check core/organizer_v17.mjs && node --check core/execution_jobs.mjs && node --check core/github_local.mjs && node --check core/project_tree.mjs && node --check core/runtime.mjs && node --check app/v11/common.js && node --check app/v11/files.js && node --check app/v11/projects.js && node --check app/v11/v17.js && node --check app/v11/main.js && node --check devhub/dev.js",
     "build":"npm run check"
   }
 }
