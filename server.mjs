@@ -5,7 +5,7 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { ensureState, readState, upsertSpace, removeSpace, replacePlan } from './core/storage.mjs';
-import { scanFolder, analyzeScan, executePlan, rollbackTransaction, commonFolders, getWorkspaceSummary, assertAllowedPath } from './core/workspace.mjs';
+import { scanFolder, analyzeScan, rollbackTransaction, commonFolders, getWorkspaceSummary, assertAllowedPath } from './core/workspace.mjs';
 import { devStatus, runConsole, projectAction, checkUpdate, pullUpdate, restartApp, addProject, repoRoot } from './core/dev.mjs';
 import { listLocalProjects, inspectLocalProject, cloneLocalProject, addExistingProject, createEmptyProject, localProjectAction, localGit, localConsole } from './core/projects.mjs';
 import { indexFolderDocuments, enrichPlanWithDocuments } from './core/documents.mjs';
@@ -14,10 +14,11 @@ import { listProjectTree } from './core/project_tree.mjs';
 import { startRuntime, runtimeStatus, stopRuntime, restartRuntime, openRuntime } from './core/runtime.mjs';
 import { startOrganizerJob, organizerJobStatus, cancelOrganizerJob } from './core/organizer_v17.mjs';
 import { startExecutionJob, executionJobStatus, cancelExecutionJob } from './core/execution_jobs.mjs';
+import { auditHistoricalRecovery, listRecoveryCheckpoints, restoreRecoveryCheckpoint } from './core/recovery_center.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
 const port=Number(process.env.PORT||4310);
-const version='1.7.1';
+const version='1.8.0';
 await ensureState();
 function sendJson(res,status,data){res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data));}
 async function body(req){let b='';for await(const c of req){b+=c;if(b.length>2_000_000)throw new Error('Payload muito grande.');}return b?JSON.parse(b):{};}
@@ -39,7 +40,7 @@ async function projectWithTree(id){const project=await inspectLocalProject(id);i
 
 const server=http.createServer(async(req,res)=>{try{
   const u=new URL(req.url,'http://127.0.0.1');
-  if(u.pathname==='/api/system'&&req.method==='GET'){const ws=await getWorkspaceSummary(),state=await readState();return sendJson(res,200,{ok:true,version,machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,...ws});}
+  if(u.pathname==='/api/system'&&req.method==='GET'){const ws=await getWorkspaceSummary(),state=await readState();return sendJson(res,200,{ok:true,version,machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,safety:{physicalCheckpointRequired:true,legacyExecuteBlocked:true,recoveryCenter:true},...ws});}
   if(u.pathname==='/api/spaces'&&req.method==='POST')return sendJson(res,200,{ok:true,space:await upsertSpace(await body(req))});
   if(u.pathname.startsWith('/api/spaces/')&&req.method==='DELETE')return sendJson(res,200,{ok:true,removed:await removeSpace(decodeURIComponent(u.pathname.split('/').pop()))});
   if(u.pathname==='/api/pick/folder'&&req.method==='POST')return sendJson(res,200,{ok:true,path:powershellDialog('folder')});
@@ -53,9 +54,13 @@ const server=http.createServer(async(req,res)=>{try{
   if(u.pathname.startsWith('/api/execution/jobs/')&&u.pathname.endsWith('/cancel')&&req.method==='POST'){const id=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,job:cancelExecutionJob(id)});}
   if(u.pathname.startsWith('/api/execution/jobs/')&&req.method==='GET'){const id=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,job:executionJobStatus(id)});}
 
+  if(u.pathname==='/api/recovery/audit'&&req.method==='GET')return sendJson(res,200,{ok:true,audit:await auditHistoricalRecovery()});
+  if(u.pathname==='/api/recovery/checkpoints'&&req.method==='GET')return sendJson(res,200,{ok:true,checkpoints:await listRecoveryCheckpoints()});
+  if(u.pathname.startsWith('/api/recovery/checkpoints/')&&u.pathname.endsWith('/restore')&&req.method==='POST'){const checkpointId=decodeURIComponent(u.pathname.split('/')[4]),b=await body(req);return sendJson(res,200,{ok:true,restore:await restoreRecoveryCheckpoint(checkpointId,{dryRun:b.dryRun!==false})});}
+
   if(u.pathname==='/api/workspace/scan'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,scan:await scanFolder(b.path,b.spaceId)});}
   if(u.pathname==='/api/workspace/analyze'&&req.method==='POST'){const b=await body(req),plan=await analyzeScan(b.scanId,b.spaceId),state=await readState(),scan=state.scans.find(s=>s.id===b.scanId);let enriched=plan;try{const docs=indexFolderDocuments(scan?.files||[]);enriched=enrichPlanWithDocuments(plan,docs);await replacePlan(enriched);}catch(e){enriched={...plan,documentIntelligence:{count:0,readComplete:0,failed:0,error:e.message},findings:[...(plan.findings||[]),{type:'document_read_error',severity:'low',message:`A organização estrutural foi concluída, mas a leitura documental encontrou um problema: ${e.message}`}]};await replacePlan(enriched);}return sendJson(res,200,{ok:true,plan:enriched});}
-  if(u.pathname==='/api/workspace/execute'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,transaction:await executePlan(b.planId,b.operationIds)});}
+  if(u.pathname==='/api/workspace/execute'&&req.method==='POST')return sendJson(res,409,{ok:false,error:'Execução legada bloqueada por segurança. Use o executor protegido, que cria checkpoint físico antes de mover qualquer arquivo.'});
   if(u.pathname.startsWith('/api/transactions/')&&u.pathname.endsWith('/rollback')&&req.method==='POST'){const parts=u.pathname.split('/');return sendJson(res,200,{ok:true,transaction:await rollbackTransaction(parts[3])});}
   if(u.pathname==='/api/document/read'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,document:readDocument(b.path)});}
 
