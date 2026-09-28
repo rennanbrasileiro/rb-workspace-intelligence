@@ -12,11 +12,12 @@ import { indexFolderDocuments, enrichPlanWithDocuments } from './core/documents.
 import { githubLocalStatus, listGithubRepositories, beginGithubLogin, installGithubCli } from './core/github_local.mjs';
 import { listProjectTree } from './core/project_tree.mjs';
 import { startRuntime, runtimeStatus, stopRuntime, restartRuntime, openRuntime } from './core/runtime.mjs';
-import { startOrganizerJob, organizerJobStatus, cancelOrganizerJob } from './core/organizer_jobs.mjs';
+import { startOrganizerJob, organizerJobStatus, cancelOrganizerJob } from './core/organizer_v17.mjs';
 import { startExecutionJob, executionJobStatus, cancelExecutionJob } from './core/execution_jobs.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
 const port=Number(process.env.PORT||4310);
+const version='1.7.0';
 await ensureState();
 function sendJson(res,status,data){res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data));}
 async function body(req){let b='';for await(const c of req){b+=c;if(b.length>2_000_000)throw new Error('Payload muito grande.');}return b?JSON.parse(b):{};}
@@ -38,7 +39,7 @@ async function projectWithTree(id){const project=await inspectLocalProject(id);i
 
 const server=http.createServer(async(req,res)=>{try{
   const u=new URL(req.url,'http://127.0.0.1');
-  if(u.pathname==='/api/system'&&req.method==='GET'){const ws=await getWorkspaceSummary(),state=await readState();return sendJson(res,200,{ok:true,version:'1.6.0',machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,...ws});}
+  if(u.pathname==='/api/system'&&req.method==='GET'){const ws=await getWorkspaceSummary(),state=await readState();return sendJson(res,200,{ok:true,version,machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,...ws});}
   if(u.pathname==='/api/spaces'&&req.method==='POST')return sendJson(res,200,{ok:true,space:await upsertSpace(await body(req))});
   if(u.pathname.startsWith('/api/spaces/')&&req.method==='DELETE')return sendJson(res,200,{ok:true,removed:await removeSpace(decodeURIComponent(u.pathname.split('/').pop()))});
   if(u.pathname==='/api/pick/folder'&&req.method==='POST')return sendJson(res,200,{ok:true,path:powershellDialog('folder')});
@@ -88,4 +89,4 @@ const server=http.createServer(async(req,res)=>{try{
 }catch(e){console.error('[RBWI]',e.stack||e.message||e);if((req.url||'').startsWith('/api/'))return sendJson(res,400,{ok:false,error:e.message||String(e)});res.writeHead(404,{'content-type':'text/plain; charset=utf-8'});res.end('Not found');}});
 server.on('clientError',(err,socket)=>{console.error('[HTTP]',err.message);socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');});
 process.on('uncaughtException',e=>console.error('[UNCAUGHT]',e));process.on('unhandledRejection',e=>console.error('[UNHANDLED]',e));
-server.listen(port,'127.0.0.1',()=>console.log(`RB Workspace Intelligence v1.6.0 · http://127.0.0.1:${port} · ${repoRoot}`));
+server.listen(port,'127.0.0.1',()=>console.log(`RB Workspace Intelligence v${version} · http://127.0.0.1:${port} · ${repoRoot}`));
