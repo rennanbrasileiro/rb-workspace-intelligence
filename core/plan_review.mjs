@@ -16,6 +16,7 @@ function reviewStatus(op){if(op.reviewExcluded)return'excluded';if(op.type==='QU
 function reviewSnapshot(op){return{after:op.after,type:op.type,preserveSource:Boolean(op.preserveSource),recommended:Boolean(op.recommended),reviewExcluded:Boolean(op.reviewExcluded),reviewApproved:Boolean(op.reviewApproved)};}
 function documentInfo(plan,source){const docs=plan.documentIntelligence?.documents||[];const target=path.resolve(source);return docs.find(d=>{try{return path.resolve(d.path)===target}catch{return false}})||null;}
 function publicOperation(op){return{id:op.id,type:op.type,before:op.before,after:op.after,reason:op.reason||'',confidence:op.confidence||'',recommended:Boolean(op.recommended),area:op.area||'Outros',family:op.family||'',subject:op.subject||'Geral',subtopic:op.subtopic||'',category:op.category||'',referenceRisk:referenceRisk(op),reviewEdited:Boolean(op.reviewEdited),reviewExcluded:Boolean(op.reviewExcluded),reviewApproved:Boolean(op.reviewApproved),reviewQuarantined:op.type==='QUARANTINE_FILE',reviewStatus:reviewStatus(op)};}
+function reviewCounts(operations=[]){return operations.reduce((a,o)=>{const status=reviewStatus(o);a[status]=(a[status]||0)+1;a.total++;if(status!=='pending')a.reviewed++;if(referenceRisk(o))a.references++;return a;},{total:0,reviewed:0,pending:0,approved:0,adjusted:0,excluded:0,quarantine:0,references:0});}
 function pushHistory(operation,before,note){operation.reviewedAt=now();operation.reviewHistory=[...(operation.reviewHistory||[]),{at:operation.reviewedAt,before,after:reviewSnapshot(operation),note:String(note||'Ajuste manual').slice(0,300)}].slice(-30);}
 function decorateOperation(operation){return{...operation,referenceRisk:referenceRisk(operation),reviewApproved:Boolean(operation.reviewApproved),reviewQuarantined:operation.type==='QUARANTINE_FILE',reviewStatus:reviewStatus(operation)};}
 
@@ -32,7 +33,7 @@ export async function getOperationReview(opId){
 
 export async function getLatestReviewPlan(){
   const state=await readState(),plan=(state.plans||[])[0];if(!plan)throw new Error('Ainda não existe um plano para revisar. Analise uma pasta primeiro.');
-  const operations=(plan.operations||[]).map(publicOperation),counts=operations.reduce((a,o)=>{a[o.reviewStatus]=(a[o.reviewStatus]||0)+1;a.total++;if(o.reviewStatus!=='pending')a.reviewed++;return a;},{total:0,reviewed:0,pending:0,approved:0,adjusted:0,excluded:0,quarantine:0});
+  const operations=(plan.operations||[]).map(publicOperation),counts=reviewCounts(plan.operations||[]);
   return{id:plan.id,root:plan.root,createdAt:plan.createdAt,spaceId:plan.spaceId,spaceName:plan.spaceName||'',destinationRoot:plan.destinationRoot||'',counts,operations};
 }
 
@@ -83,7 +84,7 @@ export async function resetOperationReview(opId){
 
 export async function filterReviewedSelection(planId,operationIds=[]){
   const state=await readState(),plan=(state.plans||[]).find(p=>p.id===planId);if(!plan)throw new Error('Plano não encontrado. Faça uma nova análise.');const requested=new Set(operationIds||[]),selected=(plan.operations||[]).filter(o=>requested.has(o.id)),active=selected.filter(o=>!o.reviewExcluded),excluded=selected.filter(o=>o.reviewExcluded);
-  return{operationIds:active.map(o=>o.id),requested:selected.length,active:active.length,excluded:{count:excluded.length,items:excluded.slice(0,20).map(publicOperation)}};
+  return{operationIds:active.map(o=>o.id),requested:selected.length,active:active.length,review:reviewCounts(active),requestedReview:reviewCounts(selected),excluded:{count:excluded.length,items:excluded.slice(0,20).map(publicOperation)}};
 }
 
 export async function selectionReferenceProtection(planId,operationIds=[]){
@@ -91,4 +92,4 @@ export async function selectionReferenceProtection(planId,operationIds=[]){
   return{count:risky.length,required:risky.length>0,forcedRetentionMode:risky.length?'preserve_original':null,items:risky.slice(0,20).map(o=>({id:o.id,path:o.before,target:o.after,ext:path.extname(o.before||'').toLowerCase()}))};
 }
 
-export function reviewSafetySummary(){return{referenceExtensions:[...REFERENCE_EXTS],referencePolicy:'preserve_original',quarantineRoot:path.join(home,'_RB_Quarantine','Revisao'),hardDeleteAvailable:false,reviewStatuses:['pending','approved','adjusted','excluded','quarantine'],home};}
+export function reviewSafetySummary(){return{referenceExtensions:[...REFERENCE_EXTS],referencePolicy:'preserve_original',quarantineRoot:path.join(home,'_RB_Quarantine','Revisao'),hardDeleteAvailable:false,reviewStatuses:['pending','approved','adjusted','excluded','quarantine'],pendingExecutionRequiresExplicitApproval:true,home};}
