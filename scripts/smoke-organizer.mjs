@@ -20,7 +20,7 @@ await Promise.all(writes);
 
 try{
   const { ensureState }=await import('../core/storage.mjs');
-  const { startOrganizerJob, organizerJobStatus }=await import('../core/organizer_jobs.mjs');
+  const { startOrganizerJob, organizerJobStatus }=await import('../core/organizer_v17.mjs');
   await ensureState();
   const started=startOrganizerJob({path:temp,spaceId:'rb-hub'});
   let job=started;
@@ -39,7 +39,7 @@ try{
   if(!malformed)throw new Error('O arquivo PDF inválido desapareceu do resultado; ele deve ser registrado como aviso/falha isolada.');
   const topics=new Set(moves.map(o=>o.subject));
   if(![...topics].some(t=>/SEFAZ|Fiscal/i.test(t)))throw new Error(`Tema SEFAZ/Fiscal não foi reconhecido: ${[...topics].slice(0,20).join(', ')}`);
-  console.log(`Organizer large smoke OK · ${job.counters.documents} documentos · ${moves.length} movimentos · arquivo inválido isolado sem abortar`);
+  console.log(`Organizer v1.7 large smoke OK · ${job.counters.documents} documentos · ${moves.length} movimentos · arquivo inválido isolado sem abortar`);
 } finally {
   await rm(temp,{recursive:true,force:true});
   await rm(data,{recursive:true,force:true});
