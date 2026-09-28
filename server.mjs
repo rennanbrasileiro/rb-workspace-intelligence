@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { ensureState, readState, upsertSpace, removeSpace, replacePlan } from './core/storage.mjs';
 import { scanFolder, analyzeScan, commonFolders, getWorkspaceSummary, assertAllowedPath } from './core/workspace.mjs';
 import { rollbackTransactionSafe } from './core/rollback_safe.mjs';
-import { getOperationReview, getLatestReviewPlan, updateOperationReview, resetOperationReview, filterReviewedSelection, selectionReferenceProtection, reviewSafetySummary } from './core/plan_review.mjs';
+import { getOperationReview, getLatestReviewPlan, updateOperationReview, quarantineOperationReview, resetOperationReview, filterReviewedSelection, selectionReferenceProtection, reviewSafetySummary } from './core/plan_review.mjs';
 import { devStatus, runConsole, projectAction, checkUpdate, pullUpdate, restartApp, addProject, repoRoot } from './core/dev.mjs';
 import { listLocalProjects, inspectLocalProject, cloneLocalProject, addExistingProject, createEmptyProject, localProjectAction, localGit, localConsole } from './core/projects.mjs';
 import { indexFolderDocuments, enrichPlanWithDocuments } from './core/documents.mjs';
@@ -42,10 +42,11 @@ function powershellDialog(kind){
 function readDocument(input){const resolved=assertAllowedPath(input),script=path.join(root,'agent','reader.py'),r=spawnSync('python',[script,resolved],{encoding:'utf8',maxBuffer:128*1024*1024,windowsHide:true});let parsed;try{parsed=JSON.parse((r.stdout||'').trim())}catch{throw new Error(r.stderr||'O extrator de documentos não retornou uma resposta válida.');}if(r.status||!parsed.ok)throw new Error(parsed.error||r.stderr||'Falha ao ler documento.');return parsed.document;}
 async function projectWithTree(id){const project=await inspectLocalProject(id);if(project.exists){const fullTree=await listProjectTree(project.path);project.tree=fullTree;project.stats={files:fullTree.files,folders:fullTree.folders};}return project;}
 function revealPath(input){const resolved=assertAllowedPath(input);if(process.platform==='win32')spawnSync('explorer.exe',[`/select,${resolved}`],{windowsHide:false});else if(process.platform==='darwin')spawnSync('open',['-R',resolved],{windowsHide:false});else spawnSync('xdg-open',[path.dirname(resolved)],{windowsHide:false});return resolved;}
+function openPath(input){const resolved=assertAllowedPath(input);if(process.platform==='win32'){const encoded=Buffer.from(resolved,'utf8').toString('base64'),script=`$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}')); Start-Process -FilePath $p`;const r=spawnSync('powershell.exe',['-NoProfile','-Command',script],{encoding:'utf8',windowsHide:true});if(r.status)throw new Error(r.stderr||'Não foi possível abrir o arquivo.');}else if(process.platform==='darwin')spawnSync('open',[resolved],{windowsHide:false});else spawnSync('xdg-open',[resolved],{windowsHide:false});return resolved;}
 
 const server=http.createServer(async(req,res)=>{try{
   const u=new URL(req.url,'http://127.0.0.1');
-  if(u.pathname==='/api/system'&&req.method==='GET'){const ws=await getWorkspaceSummary(),state=await readState();return sendJson(res,200,{ok:true,version,buildCommit,machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,safety:{physicalCheckpointRequired:true,legacyExecuteBlocked:true,recoveryCenter:true,transferStrategy:'copy_verify_commit',safeRollback:true,fullProfileAnalysisBlockedByDefault:true,executionPreflight:true,interactivePlanReview:true,externalReferencePreservation:true,persistentReviewExclusions:true},reviewSafety:reviewSafetySummary(),...ws});}
+  if(u.pathname==='/api/system'&&req.method==='GET'){const ws=await getWorkspaceSummary(),state=await readState();return sendJson(res,200,{ok:true,version,buildCommit,machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,safety:{physicalCheckpointRequired:true,legacyExecuteBlocked:true,recoveryCenter:true,transferStrategy:'copy_verify_commit',safeRollback:true,fullProfileAnalysisBlockedByDefault:true,executionPreflight:true,interactivePlanReview:true,externalReferencePreservation:true,persistentReviewExclusions:true,safeQuarantine:true,hardDeleteAvailable:false},reviewSafety:reviewSafetySummary(),...ws});}
   if(u.pathname==='/api/spaces'&&req.method==='POST')return sendJson(res,200,{ok:true,space:await upsertSpace(await body(req))});
   if(u.pathname.startsWith('/api/spaces/')&&req.method==='DELETE')return sendJson(res,200,{ok:true,removed:await removeSpace(decodeURIComponent(u.pathname.split('/').pop()))});
   if(u.pathname==='/api/pick/folder'&&req.method==='POST')return sendJson(res,200,{ok:true,path:powershellDialog('folder')});
@@ -53,6 +54,8 @@ const server=http.createServer(async(req,res)=>{try{
 
   if(u.pathname==='/api/review/latest-plan'&&req.method==='GET')return sendJson(res,200,{ok:true,plan:await getLatestReviewPlan()});
   if(u.pathname==='/api/review/reveal'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,path:revealPath(b.path)});}
+  if(u.pathname==='/api/review/open'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,path:openPath(b.path)});}
+  if(u.pathname.startsWith('/api/review/operations/')&&u.pathname.endsWith('/quarantine')&&req.method==='POST'){const opId=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,review:await quarantineOperationReview(opId)});}
   if(u.pathname.startsWith('/api/review/operations/')&&u.pathname.endsWith('/reset')&&req.method==='POST'){const opId=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,review:await resetOperationReview(opId)});}
   if(u.pathname.startsWith('/api/review/operations/')&&req.method==='GET'){const opId=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,review:await getOperationReview(opId)});}
   if(u.pathname.startsWith('/api/review/operations/')&&req.method==='POST'){const opId=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,review:await updateOperationReview(opId,await body(req))});}
@@ -94,7 +97,7 @@ const server=http.createServer(async(req,res)=>{try{
   if(u.pathname==='/api/projects/runtime/open'&&req.method==='POST'){const b=await body(req),project=await projectWithTree(b.projectId);return sendJson(res,200,{ok:true,...openRuntime(b.projectId,project.localUrl||'')});}
   if(u.pathname.startsWith('/api/projects/runtime/')&&req.method==='GET'){const id=decodeURIComponent(u.pathname.split('/').pop());return sendJson(res,200,{ok:true,runtime:runtimeStatus(id)});}
 
-  if(u.pathname==='/api/dev/status'&&req.method==='GET'){return sendJson(res,200,{ok:true,...await devStatus()});}
+  if(u.pathname==='/api/dev/status'&&req.method==='GET')return sendJson(res,200,{ok:true,...await devStatus()});
   if(u.pathname==='/api/dev/command'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,result:await runConsole(b.projectId,b.command)});}
   if(u.pathname==='/api/dev/project'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,message:await projectAction(b.projectId,b.action)});}
   if(u.pathname==='/api/dev/projects'&&req.method==='POST')return sendJson(res,200,{ok:true,project:await addProject(await body(req))});
