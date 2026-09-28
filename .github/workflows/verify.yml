@@ -18,4 +18,5 @@ jobs:
       - run: node scripts/smoke-organizer.mjs
       - run: node scripts/smoke-execution.mjs
       - run: node scripts/smoke-v17-families.mjs
+      - run: node scripts/smoke-noise-protection.mjs
       - run: node scripts/smoke-recovery.mjs
