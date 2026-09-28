@@ -8,12 +8,19 @@ import { assertAllowedPath } from './workspace.mjs';
 const home=path.resolve(os.homedir());
 export const recoveryRoot=path.join(home,'.rb-workspace-intelligence','recovery');
 const checkpointsRoot=path.join(recoveryRoot,'checkpoints');
+const RECOVERY_RESERVE_BYTES=512*1024*1024;
 function now(){return new Date().toISOString();}
 function id(){return `checkpoint_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;}
 async function exists(p){try{await access(p);return true}catch{return false}}
 function relSafe(file){const rel=path.relative(home,file);if(rel.startsWith('..')||path.isAbsolute(rel))throw new Error('Arquivo fora do perfil do usuário.');return rel;}
 async function hashFile(file){return new Promise(async(resolve,reject)=>{try{const {createReadStream}=await import('node:fs');const h=crypto.createHash('sha256'),s=createReadStream(file);s.on('data',d=>h.update(d));s.on('error',reject);s.on('end',()=>resolve(h.digest('hex')));}catch(e){reject(e)}})}
 async function writeManifest(dir,manifest){await writeFile(path.join(dir,'manifest.json'),JSON.stringify(manifest,null,2),'utf8');}
+
+export async function recoveryCapacity(requiredBytes=0){
+  await mkdir(checkpointsRoot,{recursive:true});
+  const fsinfo=await statfs(checkpointsRoot).catch(()=>null),freeBytes=fsinfo?Number(fsinfo.bavail)*Number(fsinfo.bsize):null,required=Number(requiredBytes||0);
+  return{requiredBytes:required,reserveBytes:RECOVERY_RESERVE_BYTES,requiredWithReserveBytes:required+RECOVERY_RESERVE_BYTES,freeBytes,enough:freeBytes===null?null:freeBytes>=required+RECOVERY_RESERVE_BYTES};
+}
 
 export async function createRecoveryCheckpoint({planId,operations,onProgress=()=>{},isCancelled=()=>false}={}){
   const selected=(operations||[]).filter(o=>['MOVE_FILE','QUARANTINE_FILE'].includes(o.type));
@@ -26,10 +33,8 @@ export async function createRecoveryCheckpoint({planId,operations,onProgress=()=
     if(!s?.isFile())throw new Error(`Checkpoint cancelado: arquivo de origem não existe: ${source}`);
     totalBytes+=s.size;stats.push({op,source,size:s.size,mtimeMs:s.mtimeMs});
   }
-  const fsinfo=await statfs(checkpointsRoot).catch(()=>null);
-  const free=fsinfo?Number(fsinfo.bavail)*Number(fsinfo.bsize):null;
-  const reserve=512*1024*1024;
-  if(free!==null&&free<totalBytes+reserve)throw new Error(`Checkpoint cancelado: espaço livre insuficiente. Necessário ${(totalBytes/1073741824).toFixed(2)} GB + reserva de segurança.`);
+  const capacity=await recoveryCapacity(totalBytes);
+  if(capacity.enough===false)throw new Error(`Checkpoint cancelado: espaço livre insuficiente. Necessário ${(totalBytes/1073741824).toFixed(2)} GB + reserva de segurança.`);
   const checkpointId=id(),dir=path.join(checkpointsRoot,checkpointId),filesDir=path.join(dir,'files');
   await mkdir(filesDir,{recursive:true});
   const manifest={id:checkpointId,planId,createdAt:now(),updatedAt:now(),status:'creating',totalFiles:selected.length,totalBytes,copiedFiles:0,copiedBytes:0,entries:[]};
