@@ -4,8 +4,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 
-const root=path.join(os.homedir(),`rbwi-v19-smoke-${Date.now()}`);
-const data=path.join(os.homedir(),`.rbwi-v19-state-${Date.now()}`);
+const root=path.join(os.homedir(),`rbwi-v110-smoke-${Date.now()}`);
+const data=path.join(os.homedir(),`.rbwi-v110-state-${Date.now()}`);
 process.env.RBWI_DATA_DIR=data;
 
 try{
@@ -13,22 +13,25 @@ try{
   const { rollbackTransactionSafe }=await import('../core/rollback_safe.mjs');
   const { validateOrganizerScope }=await import('../core/organizer_v17.mjs');
   const { executionPreflight }=await import('../core/execution_jobs.mjs');
+  const { getOperationReview, selectionReferenceProtection }=await import('../core/plan_review.mjs');
   const { executePlan, rollbackTransaction, scanFolder }=await import('../core/workspace.mjs');
   await ensureState();
 
   const original=path.join(root,'original','documento.txt');
   const organized=path.join(root,'organizado','documento.txt');
   await mkdir(path.dirname(organized),{recursive:true});
-  const content='conteudo-validado-v19';
+  const content='conteudo-validado-v110';
   await writeFile(organized,content,'utf8');
   const hash=crypto.createHash('sha256').update(content).digest('hex');
-  await saveTransaction({id:'tx-v19',planId:'plan-v19',spaceId:'pessoal',checkpointId:'cp-v19',createdAt:new Date().toISOString(),status:'completed',operations:[{id:'op-v19',type:'MOVE_FILE',before:original,after:organized,beforeHash:hash,afterHash:hash,status:'completed'}],summary:{requested:1,completed:1,failed:0}});
-  const rolled=await rollbackTransactionSafe('tx-v19');
+  await saveTransaction({id:'tx-v110',planId:'plan-v110',spaceId:'pessoal',checkpointId:'cp-v110',createdAt:new Date().toISOString(),status:'completed',operations:[{id:'op-v110',type:'MOVE_FILE',before:original,after:organized,beforeHash:hash,afterHash:hash,status:'completed'}],summary:{requested:1,completed:1,failed:0}});
+  const rolled=await rollbackTransactionSafe('tx-v110');
   assert.equal(rolled.status,'rolled_back');
   assert.equal(await readFile(original,'utf8'),content);
   assert.equal(await readFile(organized,'utf8'),content);
   assert.equal(rolled.rollbackResults[0].organizedCopyPreserved,true);
   assert.equal(typeof executionPreflight,'function');
+  assert.equal(typeof getOperationReview,'function');
+  assert.equal(typeof selectionReferenceProtection,'function');
 
   assert.throws(()=>validateOrganizerScope(os.homedir()),/bloqueado por padrão/i);
   const advanced=validateOrganizerScope(os.homedir(),{allowProfileRoot:true});
@@ -40,6 +43,8 @@ try{
 
   const server=await readFile(new URL('../server.mjs',import.meta.url),'utf8');
   const organizerUi=await readFile(new URL('../app/v11/files.js',import.meta.url),'utf8');
+  const reviewUi=await readFile(new URL('../app/v11/review.js',import.meta.url),'utf8');
+  const mainUi=await readFile(new URL('../app/v11/main.js',import.meta.url),'utf8');
   const recoveryUi=await readFile(new URL('../app/v11/recovery.js',import.meta.url),'utf8');
   const launcher=await readFile(new URL('../tools/RB_WORKSPACE_LATEST.ps1',import.meta.url),'utf8');
   const installer=await readFile(new URL('../tools/INSTALAR_RB_WORKSPACE_ULTIMA_VERSAO.ps1',import.meta.url),'utf8');
@@ -47,9 +52,14 @@ try{
   const rootInstaller=await readFile(new URL('../INSTALL_RB_WORKSPACE.cmd',import.meta.url),'utf8');
   const pkg=JSON.parse(await readFile(new URL('../package.json',import.meta.url),'utf8'));
 
-  assert.equal(pkg.version,'1.9.0');
+  assert.equal(pkg.version,'1.10.0');
   assert.match(server,/rollbackTransactionSafe/);
-  assert.match(server,/retentionMode:b\.retentionMode/);
+  assert.match(server,/selectionReferenceProtection/);
+  assert.match(server,/interactivePlanReview:true/);
+  assert.match(server,/externalReferencePreservation:true/);
+  assert.match(server,/\/api\/review\/operations\//);
+  assert.match(server,/\/api\/review\/reveal/);
+  assert.match(server,/referenceProtection\.required\?'preserve_original'/);
   assert.match(server,/executionPreflight/);
   assert.match(server,/\/api\/execution\/preflight/);
   assert.match(server,/packageInfo\.version/);
@@ -59,6 +69,13 @@ try{
   assert.match(organizerUi,/REVISÃO DE SEGURANÇA/);
   assert.match(organizerUi,/preserve_original/);
   assert.match(organizerUi,/Centro de Recuperação/);
+  assert.match(reviewUi,/REVISÃO DO ITEM/);
+  assert.match(reviewUi,/Salvar ajuste/);
+  assert.match(reviewUi,/Não mover este item/);
+  assert.match(reviewUi,/referência protegida/);
+  assert.match(reviewUi,/api\/review\/operations/);
+  assert.match(mainUi,/initReviewExperience/);
+  assert.match(mainUi,/review\.css/);
   assert.match(recoveryUi,/backup_changed/);
   assert.match(recoveryUi,/somente auditoria/);
   assert.match(recoveryUi,/Nenhum original existente é sobrescrito silenciosamente/);
@@ -75,7 +92,7 @@ try{
   assert.doesNotMatch(rootInstaller,/START_RB_WORKSPACE\.cmd/);
   assert.match(rootInstaller,/BOOTSTRAP_RB_WORKSPACE\.ps1/);
 
-  console.log('Release contract OK · v1.9 · preflight · safe rollback · audited Recovery Center · legacy engines retired · profile guard · offline launcher · canonical bootstrap');
+  console.log('Release contract OK · v1.10 · interactive review · reference preservation · safe rollback · audited Recovery Center · legacy engines retired · profile guard · offline launcher');
 } finally {
   await rm(root,{recursive:true,force:true});
   await rm(data,{recursive:true,force:true});
