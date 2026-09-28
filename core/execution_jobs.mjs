@@ -1,4 +1,4 @@
-import { mkdir, rename, stat, access, copyFile, open, unlink, rm } from 'node:fs/promises';
+import { mkdir, link, stat, access, copyFile, open, unlink, rm } from 'node:fs/promises';
 import { createReadStream, constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -9,6 +9,7 @@ import { createRecoveryCheckpoint, recoveryCapacity } from './recovery_center.mj
 const jobs=new Map();
 const CHECKPOINT_EVERY=50;
 const RETENTION_MODES=new Set(['remove_after_verified_copy','preserve_original']);
+const FINALIZATION_STRATEGY='atomic_hardlink_no_replace';
 function now(){return new Date().toISOString();}
 async function exists(p){try{await access(p);return true}catch{return false}}
 async function hashFile(file){return new Promise((resolve,reject)=>{const h=crypto.createHash('sha256'),s=createReadStream(file);s.on('data',d=>h.update(d));s.on('error',reject);s.on('end',()=>resolve(h.digest('hex')));});}
@@ -40,8 +41,17 @@ export async function executionPreflight({planId,operationIds}={}){
     plannedTargetCollisions:{count:plannedTargetCollisions.length,items:plannedTargetCollisions.slice(0,20)},
     protected:{projects:Number(skipped.repositoryCount||0),technical:Number(skipped.technicalCount||0),system:Number(skipped.systemCount||0)},
     safeToStart:missingSources.length===0&&capacity.enough!==false,
-    movementStrategy:'copy_verify_commit',checkpointRequired:true,retentionModes:[...RETENTION_MODES]
+    movementStrategy:'copy_verify_commit',finalizationStrategy:FINALIZATION_STRATEGY,checkpointRequired:true,retentionModes:[...RETENTION_MODES]
   };
+}
+
+async function atomicFinalizeNoReplace(tmp,target){
+  try{await link(tmp,target);}
+  catch(e){
+    if(e?.code==='EEXIST')throw new Error('O destino foi ocupado durante a operação. A origem foi preservada.');
+    throw new Error(`Não foi possível finalizar atomicamente sem sobrescrever o destino. A origem foi preservada. ${e?.message||e}`);
+  }
+  await unlink(tmp).catch(()=>{});
 }
 
 async function verifiedTransfer(source,target,{preserveOriginal=false}={}){
@@ -53,18 +63,17 @@ async function verifiedTransfer(source,target,{preserveOriginal=false}={}){
     await syncFile(tmp);
     const tempHash=await hashFile(tmp);
     if(tempHash!==beforeHash)throw new Error('Cópia temporária falhou na validação SHA-256. A origem foi preservada.');
-    if(await exists(target))throw new Error('O destino foi ocupado durante a operação. A origem foi preservada.');
-    await rename(tmp,target);
+    await atomicFinalizeNoReplace(tmp,target);
     committed=true;
     await syncFile(target);
     const afterHash=await hashFile(target);
     if(afterHash!==beforeHash){await rm(target,{force:true}).catch(()=>{});committed=false;throw new Error('Destino final falhou na validação SHA-256. A origem foi preservada.');}
 
-    if(preserveOriginal)return{beforeHash,afterHash,sourceRemoved:false,sourceRetainedReason:'retention_mode'};
+    if(preserveOriginal)return{beforeHash,afterHash,sourceRemoved:false,sourceRetainedReason:'retention_mode',finalizationStrategy:FINALIZATION_STRATEGY};
     const sourceHashNow=await hashFile(source).catch(()=>null);
-    if(!sourceHashNow||sourceHashNow!==beforeHash)return{beforeHash,afterHash,sourceRemoved:false,sourceRetainedReason:'source_changed_after_copy'};
-    try{await unlink(source);return{beforeHash,afterHash,sourceRemoved:true,sourceRetainedReason:null};}
-    catch{return{beforeHash,afterHash,sourceRemoved:false,sourceRetainedReason:'source_remove_failed'};}
+    if(!sourceHashNow||sourceHashNow!==beforeHash)return{beforeHash,afterHash,sourceRemoved:false,sourceRetainedReason:'source_changed_after_copy',finalizationStrategy:FINALIZATION_STRATEGY};
+    try{await unlink(source);return{beforeHash,afterHash,sourceRemoved:true,sourceRetainedReason:null,finalizationStrategy:FINALIZATION_STRATEGY};}
+    catch{return{beforeHash,afterHash,sourceRemoved:false,sourceRetainedReason:'source_remove_failed',finalizationStrategy:FINALIZATION_STRATEGY};}
   }catch(e){
     await rm(tmp,{force:true}).catch(()=>{});
     if(committed&&await exists(target))await rm(target,{force:true}).catch(()=>{});
@@ -73,7 +82,7 @@ async function verifiedTransfer(source,target,{preserveOriginal=false}={}){
 }
 
 async function executeOne(op,{retentionMode='remove_after_verified_copy'}={}){
-  const record={id:op.id,type:op.type,before:op.before,requestedAfter:op.after,status:'pending',movementStrategy:'copy_verify_commit',retentionMode};
+  const record={id:op.id,type:op.type,before:op.before,requestedAfter:op.after,status:'pending',movementStrategy:'copy_verify_commit',finalizationStrategy:FINALIZATION_STRATEGY,retentionMode};
   try{
     const source=assertAllowedPath(op.before),sourceStat=await stat(source).catch(()=>null);if(!sourceStat?.isFile())throw new Error('Arquivo de origem não existe mais.');
     let target=assertAllowedPath(op.after);target=await uniqueTarget(target);await mkdir(path.dirname(target),{recursive:true});
@@ -91,7 +100,7 @@ async function run(j){let tx=null;try{
   j.checkpointId=recovery.id;j.current='';
   if(j.cancelled){setJob(j,{status:'cancelled',phase:'cancelled',message:'Execução cancelada antes de qualquer movimentação. O checkpoint foi preservado.',finishedAt:now(),percent:20});return;}
   tx={id:id('tx'),planId:j.planId,spaceId:plan.spaceId,checkpointId:recovery.id,retentionMode:j.retentionMode,createdAt:now(),status:'running',operations:[],summary:{requested:selected.length,completed:0,failed:0,retainedOriginals:0}};j.transaction=tx;await saveTransaction(tx);
-  setJob(j,{status:'running',phase:'moving',percent:20,message:`Checkpoint ${recovery.id} pronto. Iniciando ${selected.length} movimentações com cópia + validação SHA-256…`});
+  setJob(j,{status:'running',phase:'moving',percent:20,message:`Checkpoint ${recovery.id} pronto. Iniciando ${selected.length} movimentações com cópia + SHA-256 + finalização atômica sem sobrescrita…`});
   for(let i=0;i<selected.length;i++){
     if(j.cancelled)break;
     const op=selected[i];j.current=op.before;setJob(j,{message:`Protegendo e finalizando ${i+1}/${selected.length} · ${path.basename(op.before)}`});
