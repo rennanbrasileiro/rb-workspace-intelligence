@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { id, readState, saveTransaction, updateTransaction } from './storage.mjs';
 import { assertAllowedPath } from './workspace.mjs';
-import { createRecoveryCheckpoint } from './recovery_center.mjs';
+import { createRecoveryCheckpoint, recoveryCapacity } from './recovery_center.mjs';
 
 const jobs=new Map();
 const CHECKPOINT_EVERY=50;
@@ -18,6 +18,31 @@ async function uniqueTarget(target){if(!(await exists(target)))return target;con
 function publicJob(j){if(!j)return null;return{id:j.id,status:j.status,phase:j.phase,percent:j.percent,message:j.message,planId:j.planId,checkpointId:j.checkpointId||null,retentionMode:j.retentionMode,startedAt:j.startedAt,updatedAt:j.updatedAt,finishedAt:j.finishedAt||null,counters:{...j.counters},current:j.current||'',error:j.error||'',transaction:['completed','completed_with_errors','cancelled'].includes(j.status)?j.transaction:undefined};}
 function setJob(j,patch){Object.assign(j,patch,{updatedAt:now()});}
 async function checkpointTx(tx){await updateTransaction(tx.id,{status:'running',operations:[...tx.operations],summary:{...tx.summary},lastCheckpointAt:now()});}
+function targetKey(p){const resolved=path.resolve(p);return process.platform==='win32'?resolved.toLowerCase():resolved;}
+
+export async function executionPreflight({planId,operationIds}={}){
+  const state=await readState(),plan=state.plans.find(p=>p.id===planId);if(!plan)throw new Error('Plano não encontrado. Faça uma nova análise.');
+  const ids=new Set(operationIds||[]),selected=plan.operations.filter(o=>ids.has(o.id));if(!selected.length)throw new Error('Selecione ao menos uma operação.');
+  let totalBytes=0;const missingSources=[],existingTargetConflicts=[],targets=new Map();
+  for(const op of selected){
+    const source=assertAllowedPath(op.before),target=assertAllowedPath(op.after),s=await stat(source).catch(()=>null);
+    if(!s?.isFile())missingSources.push(source);else totalBytes+=s.size;
+    if(await exists(target))existingTargetConflicts.push({source,target});
+    const key=targetKey(target),row=targets.get(key)||{target,sources:[]};row.sources.push(source);targets.set(key,row);
+  }
+  const plannedTargetCollisions=[...targets.values()].filter(x=>x.sources.length>1),capacity=await recoveryCapacity(totalBytes),skipped=plan.skipped||{};
+  return{
+    planId:plan.id,spaceId:plan.spaceId,root:plan.root,destinationRoot:plan.destinationRoot,
+    operations:selected.length,moves:selected.filter(o=>o.type==='MOVE_FILE').length,quarantines:selected.filter(o=>o.type==='QUARANTINE_FILE').length,
+    totalBytes,checkpointBytes:totalBytes,recoveryCapacity:capacity,
+    missingSources:{count:missingSources.length,items:missingSources.slice(0,20)},
+    existingTargetConflicts:{count:existingTargetConflicts.length,items:existingTargetConflicts.slice(0,20)},
+    plannedTargetCollisions:{count:plannedTargetCollisions.length,items:plannedTargetCollisions.slice(0,20)},
+    protected:{projects:Number(skipped.repositoryCount||0),technical:Number(skipped.technicalCount||0),system:Number(skipped.systemCount||0)},
+    safeToStart:missingSources.length===0&&capacity.enough!==false,
+    movementStrategy:'copy_verify_commit',checkpointRequired:true,retentionModes:[...RETENTION_MODES]
+  };
+}
 
 async function verifiedTransfer(source,target,{preserveOriginal=false}={}){
   const beforeHash=await hashFile(source);
