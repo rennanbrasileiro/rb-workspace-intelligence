@@ -21,16 +21,16 @@ try{
     await savePlan(plan);return plan;
   }
 
-  // 1) Preflight + movimento normal: revisão de risco antes do checkpoint e copy/verify/commit na execução.
+  // 1) Preflight + movimento normal: checkpoint, cópia, SHA-256 e finalização atômica no-replace.
   const incoming=path.join(root,'normal','entrada'),organized=path.join(root,'normal','organizado');
   await mkdir(incoming,{recursive:true});await mkdir(organized,{recursive:true});
   const total=80,operations=[];
   for(let i=0;i<total;i++){const name=`arquivo-${String(i).padStart(4,'0')}.txt`;await writeFile(path.join(incoming,name),`conteudo-${i}\n`,'utf8');operations.push({id:`normal-${i}`,type:'MOVE_FILE',before:path.join(incoming,name),after:path.join(organized,name),reason:'smoke',confidence:'high',recommended:true});}
   let plan=await createPlan(operations,'Normal',{repositoryCount:2,technicalCount:3,systemCount:1});
   let preflight=await executionPreflight({planId:plan.id,operationIds:operations.map(o=>o.id)});
-  assert.equal(preflight.operations,total);assert.equal(preflight.moves,total);assert.equal(preflight.missingSources.count,0);assert.equal(preflight.safeToStart,true);assert.ok(preflight.totalBytes>0);assert.equal(preflight.checkpointBytes,preflight.totalBytes);assert.equal(preflight.protected.projects,2);assert.notEqual(preflight.recoveryCapacity.enough,false);
+  assert.equal(preflight.operations,total);assert.equal(preflight.moves,total);assert.equal(preflight.missingSources.count,0);assert.equal(preflight.safeToStart,true);assert.ok(preflight.totalBytes>0);assert.equal(preflight.checkpointBytes,preflight.totalBytes);assert.equal(preflight.protected.projects,2);assert.notEqual(preflight.recoveryCapacity.enough,false);assert.equal(preflight.finalizationStrategy,'atomic_hardlink_no_replace');
   let job=await waitFor(startExecutionJob({planId:plan.id,operationIds:operations.map(o=>o.id)}),executionJobStatus);
-  assert.equal(job.status,'completed');assert.equal(job.counters.completed,total);assert.equal(job.counters.failed,0);assert.ok(job.checkpointId);
+  assert.equal(job.status,'completed');assert.equal(job.counters.completed,total);assert.equal(job.counters.failed,0);assert.ok(job.checkpointId);assert.equal(job.transaction.operations[0].finalizationStrategy,'atomic_hardlink_no_replace');
   assert.equal(await readFile(path.join(organized,'arquivo-0000.txt'),'utf8'),'conteudo-0\n');assert.equal(await exists(path.join(incoming,'arquivo-0000.txt')),false);
 
   // 2) Colisão: preflight sinaliza e a execução jamais sobrescreve um destino existente.
@@ -65,7 +65,7 @@ try{
   const started=startExecutionJob({planId:plan.id,operationIds:cancelOps.map(o=>o.id)});cancelExecutionJob(started.id);job=await waitFor(started,executionJobStatus);
   assert.equal(job.status,'cancelled');for(let i=0;i<12;i++){assert.equal(await readFile(path.join(cancelIn,`c-${i}.txt`),'utf8'),`cancel-${i}`);assert.equal(await exists(path.join(cancelOut,`c-${i}.txt`)),false);}
 
-  console.log('Execution smoke OK · preflight · copy/verify/commit · checkpoint abort zero moves · collision safe · retention · cancellation safe');
+  console.log('Execution smoke OK · preflight · copy/verify · atomic no-replace finalize · checkpoint abort zero moves · collision safe · retention · cancellation safe');
   for(const cp of checkpoints)await rm(path.join(recoveryRoot,'checkpoints',cp),{recursive:true,force:true});
 } finally {
   await rm(root,{recursive:true,force:true});
