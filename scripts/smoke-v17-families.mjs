@@ -1,5 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
+import assert from 'node:assert/strict';
 import { mkdir, writeFile, rm } from 'node:fs/promises';
 
 const base=path.join(os.homedir(),`rbwi-v17-${Date.now()}`),input=path.join(base,'Downloads'),organized=path.join(base,'Organizado'),data=path.join(os.homedir(),`.rbwi-v17-state-${Date.now()}`);
@@ -21,8 +22,13 @@ try{
   await file('AutoCertidao-Local-1.0.1-r12/README.md','AutoCertidao pacote técnico');
 
   const {ensureState}=await import('../core/storage.mjs');
-  const {startOrganizerJob,organizerJobStatus}=await import('../core/organizer_v17.mjs');
+  const {startOrganizerJob,organizerJobStatus,validateOrganizerScope}=await import('../core/organizer_v17.mjs');
   await ensureState();
+
+  assert.throws(()=>validateOrganizerScope(os.homedir()),/operação avançada/i,'O perfil inteiro deve estar bloqueado por padrão.');
+  const advanced=validateOrganizerScope(os.homedir(),{allowProfileRoot:true});
+  assert.equal(advanced.isProfileRoot,true,'O modo avançado deve identificar explicitamente o perfil inteiro.');
+
   const j=await waitJob(startOrganizerJob({path:input,spaceId:'pessoal'}),organizerJobStatus),ops=j.plan.operations.filter(o=>o.type==='MOVE_FILE');
   const byName=n=>ops.find(o=>path.basename(o.before)===n);
   if(byName('AutoCertidao-Local-1.0.1-r17-Final.zip')?.family!=='AutoCertidão')throw new Error('AutoCertidão não foi consolidada na família mestre.');
@@ -38,5 +44,5 @@ try{
   if(!cop)throw new Error('Consolidação da pasta Organizado não gerou movimento.');
   if(cop.after.includes(`${path.sep}Organizado${path.sep}Organizado${path.sep}`))throw new Error('Consolidação criou Organizado/Organizado.');
   if(!cop.after.includes(`${path.sep}Trabalho${path.sep}AutoCertidão${path.sep}`))throw new Error(`Destino consolidado inesperado: ${cop.after}`);
-  console.log(`V1.7 smoke OK · ${ops.length} movimentos · ${j.scan.skipped.repositoryCount} pacote(s) técnico(s) protegido(s)`);
+  console.log(`V1.7 smoke OK · ${ops.length} movimentos · ${j.scan.skipped.repositoryCount} pacote(s) técnico(s) protegido(s) · perfil completo bloqueado por padrão`);
 } finally {await rm(base,{recursive:true,force:true});await rm(data,{recursive:true,force:true});}
