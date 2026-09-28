@@ -33,8 +33,21 @@ try{
 
   const applyChanged=await restoreRecoveryCheckpoint(checkpoint.id,{dryRun:false});
   assert.equal(applyChanged.summary.originalChanged,1);
+  assert.equal(applyChanged.summary.restored,0);
   assert.equal(await readFile(source,'utf8'),'conteudo-alterado-depois-do-checkpoint');
-  console.log('smoke-recovery ok',checkpoint.id);
+
+  // Se o próprio backup físico for alterado, a restauração precisa parar por SHA-256.
+  await rm(source,{force:true});
+  await writeFile(checkpoint.entries[0].backup,'backup-corrompido-depois-do-checkpoint','utf8');
+  const backupChanged=await restoreRecoveryCheckpoint(checkpoint.id,{dryRun:true});
+  assert.equal(backupChanged.summary.backupChanged,1);
+  assert.equal(backupChanged.summary.wouldRestore,0);
+  const blockedRestore=await restoreRecoveryCheckpoint(checkpoint.id,{dryRun:false});
+  assert.equal(blockedRestore.summary.backupChanged,1);
+  assert.equal(blockedRestore.summary.restored,0);
+  await assert.rejects(()=>readFile(source,'utf8'));
+
+  console.log('smoke-recovery ok · missing restore · original changed protected · backup hash divergence blocked',checkpoint.id);
 }finally{
   await rm(base,{recursive:true,force:true});
   if(checkpoint?.id)await rm(path.join(recoveryRoot,'checkpoints',checkpoint.id),{recursive:true,force:true});
