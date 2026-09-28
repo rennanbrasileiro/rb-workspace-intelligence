@@ -32,27 +32,38 @@ export async function createRecoveryCheckpoint({planId,operations,onProgress=()=
   if(free!==null&&free<totalBytes+reserve)throw new Error(`Checkpoint cancelado: espaço livre insuficiente. Necessário ${(totalBytes/1073741824).toFixed(2)} GB + reserva de segurança.`);
   const checkpointId=id(),dir=path.join(checkpointsRoot,checkpointId),filesDir=path.join(dir,'files');
   await mkdir(filesDir,{recursive:true});
-  const manifest={id:checkpointId,planId,createdAt:now(),status:'creating',totalFiles:selected.length,totalBytes,copiedFiles:0,copiedBytes:0,entries:[]};
+  const manifest={id:checkpointId,planId,createdAt:now(),updatedAt:now(),status:'creating',totalFiles:selected.length,totalBytes,copiedFiles:0,copiedBytes:0,entries:[]};
   await writeManifest(dir,manifest);
-  for(let i=0;i<stats.length;i++){
-    if(isCancelled())throw new Error('Checkpoint cancelado pelo usuário. Nenhum arquivo foi movido.');
-    const x=stats[i],relative=relSafe(x.source),backup=path.join(filesDir,relative);
-    await mkdir(path.dirname(backup),{recursive:true});
-    await copyFile(x.source,backup);
-    const hash=await hashFile(backup);
-    const entry={operationId:x.op.id,type:x.op.type,original:x.source,plannedTarget:x.op.after,backup,relative,size:x.size,mtimeMs:x.mtimeMs,sha256:hash,copiedAt:now()};
-    manifest.entries.push(entry);manifest.copiedFiles++;manifest.copiedBytes+=x.size;
-    if((i+1)%10===0||i===stats.length-1)await writeManifest(dir,manifest);
-    onProgress({processed:i+1,total:stats.length,bytes:manifest.copiedBytes,totalBytes,file:x.source,checkpointId});
+  try{
+    for(let i=0;i<stats.length;i++){
+      if(isCancelled())throw new Error('Checkpoint cancelado pelo usuário. Nenhum arquivo foi movido.');
+      const x=stats[i],relative=relSafe(x.source),backup=path.join(filesDir,relative);
+      await mkdir(path.dirname(backup),{recursive:true});
+      const sourceHash=await hashFile(x.source);
+      await copyFile(x.source,backup);
+      const backupHash=await hashFile(backup);
+      if(sourceHash!==backupHash)throw new Error(`Checkpoint cancelado: a cópia física divergiu da origem: ${x.source}`);
+      const sourceHashAfter=await hashFile(x.source);
+      if(sourceHashAfter!==sourceHash)throw new Error(`Checkpoint cancelado: o arquivo mudou durante a cópia e foi preservado sem movimentação: ${x.source}`);
+      const entry={operationId:x.op.id,type:x.op.type,original:x.source,plannedTarget:x.op.after,backup,relative,size:x.size,mtimeMs:x.mtimeMs,sha256:backupHash,copiedAt:now()};
+      manifest.entries.push(entry);manifest.copiedFiles++;manifest.copiedBytes+=x.size;manifest.updatedAt=now();
+      await writeManifest(dir,manifest);
+      onProgress({processed:i+1,total:stats.length,bytes:manifest.copiedBytes,totalBytes,file:x.source,checkpointId});
+    }
+    manifest.status='ready';manifest.readyAt=now();manifest.updatedAt=manifest.readyAt;await writeManifest(dir,manifest);
+    return manifest;
+  }catch(e){
+    manifest.status=isCancelled()?'cancelled':'failed';manifest.error=e.message;manifest.failedAt=now();manifest.updatedAt=manifest.failedAt;
+    try{await writeManifest(dir,manifest)}catch{}
+    e.checkpointId=checkpointId;
+    throw e;
   }
-  manifest.status='ready';manifest.readyAt=now();await writeManifest(dir,manifest);
-  return manifest;
 }
 
 export async function listRecoveryCheckpoints(){
   await mkdir(checkpointsRoot,{recursive:true});
   const dirs=await readdir(checkpointsRoot,{withFileTypes:true}).catch(()=>[]),items=[];
-  for(const e of dirs){if(!e.isDirectory())continue;try{const m=JSON.parse(await readFile(path.join(checkpointsRoot,e.name,'manifest.json'),'utf8'));items.push({id:m.id,status:m.status,createdAt:m.createdAt,readyAt:m.readyAt||null,totalFiles:m.totalFiles,totalBytes:m.totalBytes,planId:m.planId});}catch{}}
+  for(const e of dirs){if(!e.isDirectory())continue;try{const m=JSON.parse(await readFile(path.join(checkpointsRoot,e.name,'manifest.json'),'utf8'));items.push({id:m.id,status:m.status,createdAt:m.createdAt,readyAt:m.readyAt||null,failedAt:m.failedAt||null,totalFiles:m.totalFiles,totalBytes:m.totalBytes,copiedFiles:m.copiedFiles||0,copiedBytes:m.copiedBytes||0,planId:m.planId,error:m.error||''});}catch{}}
   return items.sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
 }
 
