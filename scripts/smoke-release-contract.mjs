@@ -13,7 +13,7 @@ try{
   const { rollbackTransactionSafe }=await import('../core/rollback_safe.mjs');
   const { validateOrganizerScope }=await import('../core/organizer_v17.mjs');
   const { executionPreflight }=await import('../core/execution_jobs.mjs');
-  const { getOperationReview, selectionReferenceProtection }=await import('../core/plan_review.mjs');
+  const { getOperationReview, getLatestReviewPlan, quarantineOperationReview, filterReviewedSelection, selectionReferenceProtection, reviewSafetySummary }=await import('../core/plan_review.mjs');
   const { executePlan, rollbackTransaction, scanFolder }=await import('../core/workspace.mjs');
   await ensureState();
 
@@ -31,7 +31,11 @@ try{
   assert.equal(rolled.rollbackResults[0].organizedCopyPreserved,true);
   assert.equal(typeof executionPreflight,'function');
   assert.equal(typeof getOperationReview,'function');
+  assert.equal(typeof getLatestReviewPlan,'function');
+  assert.equal(typeof quarantineOperationReview,'function');
+  assert.equal(typeof filterReviewedSelection,'function');
   assert.equal(typeof selectionReferenceProtection,'function');
+  assert.equal(reviewSafetySummary().hardDeleteAvailable,false);
 
   assert.throws(()=>validateOrganizerScope(os.homedir()),/bloqueado por padrão/i);
   const advanced=validateOrganizerScope(os.homedir(),{allowProfileRoot:true});
@@ -45,6 +49,8 @@ try{
   const organizerUi=await readFile(new URL('../app/v11/files.js',import.meta.url),'utf8');
   const reviewUi=await readFile(new URL('../app/v11/review.js',import.meta.url),'utf8');
   const mainUi=await readFile(new URL('../app/v11/main.js',import.meta.url),'utf8');
+  const reviewCss=await readFile(new URL('../app/review.css',import.meta.url),'utf8');
+  const historyCss=await readFile(new URL('../app/history-trace.css',import.meta.url),'utf8');
   const recoveryUi=await readFile(new URL('../app/v11/recovery.js',import.meta.url),'utf8');
   const launcher=await readFile(new URL('../tools/RB_WORKSPACE_LATEST.ps1',import.meta.url),'utf8');
   const installer=await readFile(new URL('../tools/INSTALAR_RB_WORKSPACE_ULTIMA_VERSAO.ps1',import.meta.url),'utf8');
@@ -55,10 +61,17 @@ try{
   assert.equal(pkg.version,'1.10.0');
   assert.match(server,/rollbackTransactionSafe/);
   assert.match(server,/selectionReferenceProtection/);
+  assert.match(server,/filterReviewedSelection/);
   assert.match(server,/interactivePlanReview:true/);
   assert.match(server,/externalReferencePreservation:true/);
+  assert.match(server,/persistentReviewExclusions:true/);
+  assert.match(server,/safeQuarantine:true/);
+  assert.match(server,/hardDeleteAvailable:false/);
+  assert.match(server,/\/api\/review\/latest-plan/);
   assert.match(server,/\/api\/review\/operations\//);
+  assert.match(server,/\/api\/review\/open/);
   assert.match(server,/\/api\/review\/reveal/);
+  assert.match(server,/quarantineOperationReview/);
   assert.match(server,/referenceProtection\.required\?'preserve_original'/);
   assert.match(server,/executionPreflight/);
   assert.match(server,/\/api\/execution\/preflight/);
@@ -70,12 +83,23 @@ try{
   assert.match(organizerUi,/preserve_original/);
   assert.match(organizerUi,/Centro de Recuperação/);
   assert.match(reviewUi,/REVISÃO DO ITEM/);
+  assert.match(reviewUi,/Revisar item a item/);
   assert.match(reviewUi,/Salvar ajuste/);
   assert.match(reviewUi,/Não mover este item/);
+  assert.match(reviewUi,/Enviar à quarentena/);
+  assert.match(reviewUi,/Abrir original/);
   assert.match(reviewUi,/referência protegida/);
   assert.match(reviewUi,/api\/review\/operations/);
+  assert.match(reviewUi,/api\/review\/open/);
   assert.match(mainUi,/initReviewExperience/);
   assert.match(mainUi,/review\.css/);
+  assert.match(mainUi,/history-trace\.css/);
+  assert.match(mainUi,/Mapa origem → destino/);
+  assert.match(mainUi,/Buscar arquivo, origem ou destino/);
+  assert.match(mainUi,/data-trace-action="open"/);
+  assert.match(reviewCss,/review-quarantine-badge/);
+  assert.match(historyCss,/trace-path-grid/);
+  assert.match(historyCss,/history-trace-toolbar/);
   assert.match(recoveryUi,/backup_changed/);
   assert.match(recoveryUi,/somente auditoria/);
   assert.match(recoveryUi,/Nenhum original existente é sobrescrito silenciosamente/);
@@ -92,7 +116,7 @@ try{
   assert.doesNotMatch(rootInstaller,/START_RB_WORKSPACE\.cmd/);
   assert.match(rootInstaller,/BOOTSTRAP_RB_WORKSPACE\.ps1/);
 
-  console.log('Release contract OK · v1.10 · interactive review · reference preservation · safe rollback · audited Recovery Center · legacy engines retired · profile guard · offline launcher');
+  console.log('Release contract OK · v1.10 · review queue · safe quarantine · traceable history · reference preservation · safe rollback · Recovery Center · legacy engines retired · profile guard · offline launcher');
 } finally {
   await rm(root,{recursive:true,force:true});
   await rm(data,{recursive:true,force:true});
