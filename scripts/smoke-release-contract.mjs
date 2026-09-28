@@ -39,6 +39,7 @@ try{
   await assert.rejects(()=>rollbackTransaction(),/desativado permanentemente/i);
 
   const server=await readFile(new URL('../server.mjs',import.meta.url),'utf8');
+  const executor=await readFile(new URL('../core/execution_jobs.mjs',import.meta.url),'utf8');
   const organizerUi=await readFile(new URL('../app/v11/files.js',import.meta.url),'utf8');
   const recoveryUi=await readFile(new URL('../app/v11/recovery.js',import.meta.url),'utf8');
   const launcher=await readFile(new URL('../tools/RB_WORKSPACE_LATEST.ps1',import.meta.url),'utf8');
@@ -56,6 +57,9 @@ try{
   assert.match(server,/fullProfileAnalysisBlockedByDefault:true/);
   assert.match(server,/executionPreflight:true/);
   assert.match(server,/buildCommit/);
+  assert.match(executor,/atomic_hardlink_no_replace/);
+  assert.match(executor,/await link\(tmp,target\)/);
+  assert.doesNotMatch(executor,/rename\(tmp,target\)/);
   assert.match(organizerUi,/REVISÃO DE SEGURANÇA/);
   assert.match(organizerUi,/preserve_original/);
   assert.match(organizerUi,/Centro de Recuperação/);
@@ -75,7 +79,7 @@ try{
   assert.doesNotMatch(rootInstaller,/START_RB_WORKSPACE\.cmd/);
   assert.match(rootInstaller,/BOOTSTRAP_RB_WORKSPACE\.ps1/);
 
-  console.log('Release contract OK · v1.9 · preflight · safe rollback · audited Recovery Center · legacy engines retired · profile guard · offline launcher · canonical bootstrap');
+  console.log('Release contract OK · v1.9 · preflight · atomic no-replace finalize · safe rollback · audited Recovery Center · legacy engines retired · profile guard · offline launcher · canonical bootstrap');
 } finally {
   await rm(root,{recursive:true,force:true});
   await rm(data,{recursive:true,force:true});
