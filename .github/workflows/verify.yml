@@ -20,3 +20,4 @@ jobs:
       - run: node scripts/smoke-v17-families.mjs
       - run: node scripts/smoke-noise-protection.mjs
       - run: node scripts/smoke-recovery.mjs
+      - run: npm run test:release
