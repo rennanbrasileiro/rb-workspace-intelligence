@@ -8,6 +8,7 @@ import {initReviewExperience} from './review.js';
 const v12=document.createElement('link');v12.rel='stylesheet';v12.href='/v12.css';document.head.appendChild(v12);
 const v16=document.createElement('link');v16.rel='stylesheet';v16.href='/v16.css';document.head.appendChild(v16);
 const reviewCss=document.createElement('link');reviewCss.rel='stylesheet';reviewCss.href='/review.css';document.head.appendChild(reviewCss);
+const historyCss=document.createElement('link');historyCss.rel='stylesheet';historyCss.href='/history-trace.css';document.head.appendChild(historyCss);
 let state=null,currentDocText='';
 function primeUx(){
   if($('versionLabel'))$('versionLabel').textContent='carregando versão validada…';
