@@ -14,6 +14,7 @@ try{
   const { validateOrganizerScope }=await import('../core/organizer_v17.mjs');
   const { executionPreflight }=await import('../core/execution_jobs.mjs');
   const { getOperationReview, getLatestReviewPlan, quarantineOperationReview, filterReviewedSelection, selectionReferenceProtection, reviewSafetySummary }=await import('../core/plan_review.mjs');
+  const { getAnalyzedInventory }=await import('../core/inventory_review.mjs');
   const { executePlan, rollbackTransaction, scanFolder }=await import('../core/workspace.mjs');
   await ensureState();
 
@@ -35,6 +36,7 @@ try{
   assert.equal(typeof quarantineOperationReview,'function');
   assert.equal(typeof filterReviewedSelection,'function');
   assert.equal(typeof selectionReferenceProtection,'function');
+  assert.equal(typeof getAnalyzedInventory,'function');
   assert.equal(reviewSafetySummary().hardDeleteAvailable,false);
   assert.equal(reviewSafetySummary().pendingExecutionRequiresExplicitApproval,true);
 
@@ -51,9 +53,12 @@ try{
   const commonUi=await readFile(new URL('../app/v11/common.js',import.meta.url),'utf8');
   const reviewUi=await readFile(new URL('../app/v11/review.js',import.meta.url),'utf8');
   const guardUi=await readFile(new URL('../app/v11/execution-review-guard.js',import.meta.url),'utf8');
+  const inventoryUi=await readFile(new URL('../app/v11/inventory.js',import.meta.url),'utf8');
+  const inventoryCore=await readFile(new URL('../core/inventory_review.mjs',import.meta.url),'utf8');
   const mainUi=await readFile(new URL('../app/v11/main.js',import.meta.url),'utf8');
   const reviewCss=await readFile(new URL('../app/review.css',import.meta.url),'utf8');
   const guardCss=await readFile(new URL('../app/execution-review-guard.css',import.meta.url),'utf8');
+  const inventoryCss=await readFile(new URL('../app/inventory.css',import.meta.url),'utf8');
   const historyCss=await readFile(new URL('../app/history-trace.css',import.meta.url),'utf8');
   const recoveryUi=await readFile(new URL('../app/v11/recovery.js',import.meta.url),'utf8');
   const launcher=await readFile(new URL('../tools/RB_WORKSPACE_LATEST.ps1',import.meta.url),'utf8');
@@ -66,16 +71,19 @@ try{
   assert.match(server,/rollbackTransactionSafe/);
   assert.match(server,/selectionReferenceProtection/);
   assert.match(server,/filterReviewedSelection/);
+  assert.match(server,/getAnalyzedInventory/);
   assert.match(server,/interactivePlanReview:true/);
   assert.match(server,/externalReferencePreservation:true/);
   assert.match(server,/persistentReviewExclusions:true/);
   assert.match(server,/safeQuarantine:true/);
   assert.match(server,/hardDeleteAvailable:false/);
   assert.match(server,/pendingExecutionRequiresExplicitApproval:true/);
+  assert.match(server,/analyzedInventoryReadOnly:true/);
   assert.match(server,/requiresPendingApproval/);
   assert.match(server,/b\.allowPending!==true/);
   assert.match(server,/allowPendingAccepted/);
   assert.match(server,/\/api\/review\/latest-plan/);
+  assert.match(server,/\/api\/review\/inventory/);
   assert.match(server,/\/api\/review\/operations\//);
   assert.match(server,/\/api\/review\/open/);
   assert.match(server,/\/api\/review\/reveal/);
@@ -105,16 +113,25 @@ try{
   assert.match(guardUi,/Revisar pendentes/);
   assert.match(guardUi,/Executar mesmo assim/);
   assert.match(guardUi,/__rbAllowPendingExecution=false/);
+  assert.match(inventoryCore,/readOnly:true/);
+  assert.match(inventoryCore,/no_action/);
+  assert.match(inventoryUi,/ACERVO ANALISADO/);
+  assert.match(inventoryUi,/Sem ação sugerida/);
+  assert.match(inventoryUi,/Revisar proposta/);
+  assert.match(inventoryUi,/api\/review\/inventory/);
   assert.match(mainUi,/initReviewExperience/);
   assert.match(mainUi,/initExecutionReviewGuard/);
+  assert.match(mainUi,/initInventoryBrowser/);
   assert.match(mainUi,/review\.css/);
   assert.match(mainUi,/execution-review-guard\.css/);
+  assert.match(mainUi,/inventory\.css/);
   assert.match(mainUi,/history-trace\.css/);
   assert.match(mainUi,/Mapa origem → destino/);
   assert.match(mainUi,/Buscar arquivo, origem ou destino/);
   assert.match(mainUi,/data-trace-action="open"/);
   assert.match(reviewCss,/review-quarantine-badge/);
   assert.match(guardCss,/pending-review-guard/);
+  assert.match(inventoryCss,/analyzed-inventory/);
   assert.match(historyCss,/trace-path-grid/);
   assert.match(historyCss,/history-trace-toolbar/);
   assert.match(recoveryUi,/backup_changed/);
@@ -133,7 +150,7 @@ try{
   assert.doesNotMatch(rootInstaller,/START_RB_WORKSPACE\.cmd/);
   assert.match(rootInstaller,/BOOTSTRAP_RB_WORKSPACE\.ps1/);
 
-  console.log('Release contract OK · v1.10 · review queue · explicit pending consent · safe quarantine · traceable history · reference preservation · safe rollback · Recovery Center · legacy engines retired · profile guard · offline launcher');
+  console.log('Release contract OK · v1.10 · analyzed inventory · review queue · explicit pending consent · safe quarantine · traceable history · reference preservation · safe rollback · Recovery Center · legacy engines retired · profile guard · offline launcher');
 } finally {
   await rm(root,{recursive:true,force:true});
   await rm(data,{recursive:true,force:true});
