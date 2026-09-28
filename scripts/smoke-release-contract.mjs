@@ -45,21 +45,23 @@ try{
   const advanced=validateOrganizerScope(os.homedir(),{allowProfileRoot:true});
   assert.equal(advanced.advanced,true);
   await assert.rejects(()=>scanFolder(os.homedir(),'pessoal'),/perfil inteiro está bloqueada/i);
-
   await assert.rejects(()=>executePlan(),/desativada permanentemente/i);
   await assert.rejects(()=>rollbackTransaction(),/desativado permanentemente/i);
 
   const server=await readFile(new URL('../server.mjs',import.meta.url),'utf8');
+  const executionCore=await readFile(new URL('../core/execution_jobs.mjs',import.meta.url),'utf8');
   const organizerUi=await readFile(new URL('../app/v11/files.js',import.meta.url),'utf8');
   const commonUi=await readFile(new URL('../app/v11/common.js',import.meta.url),'utf8');
   const reviewUi=await readFile(new URL('../app/v11/review.js',import.meta.url),'utf8');
   const guardUi=await readFile(new URL('../app/v11/execution-review-guard.js',import.meta.url),'utf8');
+  const staleUi=await readFile(new URL('../app/v11/stale-plan-guard.js',import.meta.url),'utf8');
   const inventoryUi=await readFile(new URL('../app/v11/inventory.js',import.meta.url),'utf8');
   const nameUi=await readFile(new URL('../app/v11/name-suggestions.js',import.meta.url),'utf8');
   const inventoryCore=await readFile(new URL('../core/inventory_review.mjs',import.meta.url),'utf8');
   const mainUi=await readFile(new URL('../app/v11/main.js',import.meta.url),'utf8');
   const reviewCss=await readFile(new URL('../app/review.css',import.meta.url),'utf8');
   const guardCss=await readFile(new URL('../app/execution-review-guard.css',import.meta.url),'utf8');
+  const staleCss=await readFile(new URL('../app/stale-plan-guard.css',import.meta.url),'utf8');
   const inventoryCss=await readFile(new URL('../app/inventory.css',import.meta.url),'utf8');
   const nameCss=await readFile(new URL('../app/name-suggestions.css',import.meta.url),'utf8');
   const historyCss=await readFile(new URL('../app/history-trace.css',import.meta.url),'utf8');
@@ -98,6 +100,11 @@ try{
   assert.match(server,/fullProfileAnalysisBlockedByDefault:true/);
   assert.match(server,/executionPreflight:true/);
   assert.match(server,/buildCommit/);
+  assert.match(executionCore,/analysisFreshness/);
+  assert.match(executionCore,/stalePlanBlocked:true/);
+  assert.match(executionCore,/checkpointHashBinding:true/);
+  assert.match(executionCore,/expectedHash&&beforeHash!==expectedHash/);
+  assert.match(executionCore,/mudaram depois da análise/);
   assert.match(organizerUi,/REVISÃO DE SEGURANÇA/);
   assert.match(organizerUi,/preserve_original/);
   assert.match(organizerUi,/Centro de Recuperação/);
@@ -116,6 +123,9 @@ try{
   assert.match(guardUi,/Revisar pendentes/);
   assert.match(guardUi,/Executar mesmo assim/);
   assert.match(guardUi,/__rbAllowPendingExecution=false/);
+  assert.match(staleUi,/Plano precisa ser atualizado/);
+  assert.match(staleUi,/Reanalisar pasta agora/);
+  assert.match(staleUi,/analysisSnapshot/);
   assert.match(inventoryCore,/readOnly:true/);
   assert.match(inventoryCore,/no_action/);
   assert.match(inventoryUi,/ACERVO ANALISADO/);
@@ -129,8 +139,10 @@ try{
   assert.match(mainUi,/initExecutionReviewGuard/);
   assert.match(mainUi,/initInventoryBrowser/);
   assert.match(mainUi,/initNameSuggestions/);
+  assert.match(mainUi,/initStalePlanGuard/);
   assert.match(mainUi,/review\.css/);
   assert.match(mainUi,/execution-review-guard\.css/);
+  assert.match(mainUi,/stale-plan-guard\.css/);
   assert.match(mainUi,/inventory\.css/);
   assert.match(mainUi,/name-suggestions\.css/);
   assert.match(mainUi,/history-trace\.css/);
@@ -139,6 +151,7 @@ try{
   assert.match(mainUi,/data-trace-action="open"/);
   assert.match(reviewCss,/review-quarantine-badge/);
   assert.match(guardCss,/pending-review-guard/);
+  assert.match(staleCss,/stale-plan-guard/);
   assert.match(inventoryCss,/analyzed-inventory/);
   assert.match(nameCss,/review-name-suggestions/);
   assert.match(historyCss,/trace-path-grid/);
@@ -159,7 +172,7 @@ try{
   assert.doesNotMatch(rootInstaller,/START_RB_WORKSPACE\.cmd/);
   assert.match(rootInstaller,/BOOTSTRAP_RB_WORKSPACE\.ps1/);
 
-  console.log('Release contract OK · v1.10 · filename suggestions · analyzed inventory · review queue · explicit pending consent · safe quarantine · traceable history · reference preservation · safe rollback · Recovery Center · legacy engines retired · profile guard · offline launcher');
+  console.log('Release contract OK · v1.10 · stale-plan block · checkpoint hash binding · filename suggestions · analyzed inventory · review queue · explicit pending consent · safe quarantine · traceable history · reference preservation · safe rollback · Recovery Center · legacy engines retired · profile guard · offline launcher');
 } finally {
   await rm(root,{recursive:true,force:true});
   await rm(data,{recursive:true,force:true});
