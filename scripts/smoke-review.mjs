@@ -20,15 +20,15 @@ try{
   await savePlan(plan);
 
   let latest=await getLatestReviewPlan();assert.equal(latest.id,'plan-review');assert.equal(latest.operations.length,2);assert.equal(latest.operations.find(o=>o.id==='op-html').referenceRisk,true);assert.equal(latest.counts.total,2);assert.equal(latest.counts.pending,2);assert.equal(latest.counts.reviewed,0);assert.equal(latest.counts.references,1);
-  const safety=reviewSafetySummary();assert.equal(safety.hardDeleteAvailable,false);assert.equal(safety.pendingExecutionRequiresExplicitApproval,true);assert.match(safety.quarantineRoot,/_RB_Quarantine/);assert.deepEqual(safety.reviewStatuses,['pending','approved','adjusted','excluded','quarantine']);
+  const safety=reviewSafetySummary();assert.equal(safety.hardDeleteAvailable,false);assert.equal(safety.pendingExecutionRequiresExplicitApproval,true);assert.equal(safety.contextualFilenameSuggestions,true);assert.match(safety.quarantineRoot,/_RB_Quarantine/);assert.deepEqual(safety.reviewStatuses,['pending','approved','adjusted','excluded','quarantine']);
 
-  let r=await getOperationReview('op-pdf');assert.equal(r.source.exists,true);assert.equal(r.operation.referenceRisk,false);assert.equal(r.trace.edited,false);assert.equal(r.operation.reviewStatus,'pending');
+  let r=await getOperationReview('op-pdf');assert.equal(r.source.exists,true);assert.equal(r.operation.referenceRisk,false);assert.equal(r.trace.edited,false);assert.equal(r.operation.reviewStatus,'pending');assert.ok(r.nameSuggestions.length>=2);assert.ok(r.nameSuggestions.some(s=>s.source==='context'));assert.ok(r.nameSuggestions.every(s=>s.filename.toLowerCase().endsWith('.pdf')));assert.ok(r.nameSuggestions.every(s=>!/[<>:"/\\|?*\u0000-\u001f]/.test(s.filename)));
   const custom=path.join(root,'Destino Manual');await mkdir(custom,{recursive:true});await updateOperationReview('op-pdf',{filename:'relatorio revisado.pdf',destinationDir:custom,note:'smoke'});
-  r=await getOperationReview('op-pdf');assert.equal(r.operation.after,path.join(custom,'relatorio revisado.pdf'));assert.equal(r.trace.edited,true);assert.equal(r.trace.history.length,1);assert.equal(r.trace.original.after,path.join(organized,'Trabalho','relatorio.pdf'));assert.equal(r.operation.reviewApproved,true);assert.equal(r.operation.reviewStatus,'adjusted');
+  r=await getOperationReview('op-pdf');assert.equal(r.operation.after,path.join(custom,'relatorio revisado.pdf'));assert.equal(r.trace.edited,true);assert.equal(r.trace.history.length,1);assert.equal(r.trace.original.after,path.join(organized,'Trabalho','relatorio.pdf'));assert.equal(r.operation.reviewApproved,true);assert.equal(r.operation.reviewStatus,'adjusted');assert.ok(r.nameSuggestions.every(s=>s.filename.toLowerCase().endsWith('.pdf')));
   await assert.rejects(()=>updateOperationReview('op-pdf',{filename:'relatorio.exe'}),/extensão deve permanecer/i);
   await resetOperationReview('op-pdf');r=await getOperationReview('op-pdf');assert.equal(r.operation.after,path.join(organized,'Trabalho','relatorio.pdf'));assert.equal(r.trace.edited,false);assert.equal(r.operation.reviewApproved,false);assert.equal(r.operation.reviewStatus,'pending');
 
-  let h=await getOperationReview('op-html');assert.equal(h.operation.referenceRisk,true);assert.equal(h.operation.reviewStatus,'pending');
+  let h=await getOperationReview('op-html');assert.equal(h.operation.referenceRisk,true);assert.equal(h.operation.reviewStatus,'pending');assert.ok(h.nameSuggestions.every(s=>s.filename.toLowerCase().endsWith('.html')));
   let protection=await selectionReferenceProtection('plan-review',['op-pdf','op-html']);assert.equal(protection.required,true);assert.equal(protection.count,1);assert.equal(protection.forcedRetentionMode,'preserve_original');assert.equal(protection.items[0].id,'op-html');
 
   await updateOperationReview('op-html',{excluded:true,note:'não mover smoke'});h=await getOperationReview('op-html');assert.equal(h.operation.reviewExcluded,true);assert.equal(h.operation.reviewApproved,true);assert.equal(h.operation.reviewStatus,'excluded');
@@ -43,7 +43,7 @@ try{
   await resetOperationReview('op-pdf');r=await getOperationReview('op-pdf');assert.equal(r.operation.type,'MOVE_FILE');assert.equal(r.operation.reviewQuarantined,false);assert.equal(r.operation.after,path.join(organized,'Trabalho','relatorio.pdf'));assert.equal(r.operation.reviewStatus,'pending');
 
   const state=await readState(),saved=state.plans.find(p=>p.id==='plan-review'),savedPdf=saved.operations.find(o=>o.id==='op-pdf'),savedHtml=saved.operations.find(o=>o.id==='op-html');assert.ok(savedPdf.reviewHistory.length>=4);assert.ok(savedHtml.reviewHistory.length>=2);assert.equal(savedHtml.reviewExcluded,false);assert.equal(savedHtml.reviewApproved,true);
-  console.log('Review smoke OK · progress states · selected review summary · explicit pending guard contract · global queue · persistent exclusions · safe quarantine · no hard delete · reference preservation');
+  console.log('Review smoke OK · contextual filename suggestions · extension guard · progress states · selected review summary · explicit pending guard · safe quarantine · no hard delete · reference preservation');
 } finally {
   await rm(root,{recursive:true,force:true});await rm(data,{recursive:true,force:true});
 }
