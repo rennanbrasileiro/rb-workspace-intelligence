@@ -9,6 +9,7 @@ import { createRecoveryCheckpoint, recoveryCapacity } from './recovery_center.mj
 const jobs=new Map();
 const CHECKPOINT_EVERY=50;
 const RETENTION_MODES=new Set(['remove_after_verified_copy','preserve_original']);
+const MTIME_TOLERANCE_MS=1500;
 function now(){return new Date().toISOString();}
 async function exists(p){try{await access(p);return true}catch{return false}}
 async function hashFile(file){return new Promise((resolve,reject)=>{const h=crypto.createHash('sha256'),s=createReadStream(file);s.on('data',d=>h.update(d));s.on('error',reject);s.on('end',()=>resolve(h.digest('hex')));});}
@@ -19,6 +20,14 @@ function publicJob(j){if(!j)return null;return{id:j.id,status:j.status,phase:j.p
 function setJob(j,patch){Object.assign(j,patch,{updatedAt:now()});}
 async function checkpointTx(tx){await updateTransaction(tx.id,{status:'running',operations:[...tx.operations],summary:{...tx.summary},lastCheckpointAt:now()});}
 function targetKey(p){const resolved=path.resolve(p);return process.platform==='win32'?resolved.toLowerCase():resolved;}
+function snapshotIndex(state,plan){const scan=(state.scans||[]).find(s=>s.id===plan.scanId);if(!scan)return null;return{scan,files:new Map((scan.files||[]).map(f=>[targetKey(f.path),f]))};}
+async function analysisFreshness(state,plan,selected){
+  const snapshot=snapshotIndex(state,plan);if(!snapshot)return{available:false,scanId:plan.scanId||null,count:selected.length,items:selected.slice(0,20).map(o=>({source:o.before,reason:'analysis_snapshot_missing'}))};
+  const changed=[];
+  for(const op of selected){const source=assertAllowedPath(op.before),current=await stat(source).catch(()=>null);if(!current?.isFile())continue;const scanned=snapshot.files.get(targetKey(source));if(!scanned){changed.push({source,reason:'not_in_analysis_snapshot',currentSize:current.size,currentModifiedAt:current.mtime.toISOString()});continue;}const scannedTime=Date.parse(scanned.modifiedAt||'');const sizeChanged=Number(scanned.size)!==Number(current.size),mtimeChanged=Number.isFinite(scannedTime)&&Math.abs(scannedTime-current.mtimeMs)>MTIME_TOLERANCE_MS;if(sizeChanged||mtimeChanged)changed.push({source,reason:sizeChanged?'size_changed':'modified_time_changed',analyzedSize:Number(scanned.size||0),currentSize:current.size,analyzedModifiedAt:scanned.modifiedAt||null,currentModifiedAt:current.mtime.toISOString()});}
+  return{available:true,scanId:snapshot.scan.id,count:changed.length,items:changed.slice(0,20)};
+}
+async function requireFreshAnalysis(state,plan,selected){const freshness=await analysisFreshness(state,plan,selected);if(!freshness.available)throw new Error('A execução foi bloqueada porque o snapshot da análise não está mais disponível. Reanalise a pasta antes de aplicar.');if(freshness.count)throw new Error(`${freshness.count} arquivo(s) mudaram depois da análise. A execução foi bloqueada antes do checkpoint. Reanalise a pasta para usar o conteúdo atual.`);return freshness;}
 
 export async function executionPreflight({planId,operationIds}={}){
   const state=await readState(),plan=state.plans.find(p=>p.id===planId);if(!plan)throw new Error('Plano não encontrado. Faça uma nova análise.');
@@ -30,22 +39,24 @@ export async function executionPreflight({planId,operationIds}={}){
     if(await exists(target))existingTargetConflicts.push({source,target});
     const key=targetKey(target),row=targets.get(key)||{target,sources:[]};row.sources.push(source);targets.set(key,row);
   }
-  const plannedTargetCollisions=[...targets.values()].filter(x=>x.sources.length>1),capacity=await recoveryCapacity(totalBytes),skipped=plan.skipped||{};
+  const freshness=await analysisFreshness(state,plan,selected),plannedTargetCollisions=[...targets.values()].filter(x=>x.sources.length>1),capacity=await recoveryCapacity(totalBytes),skipped=plan.skipped||{};
   return{
     planId:plan.id,spaceId:plan.spaceId,root:plan.root,destinationRoot:plan.destinationRoot,
     operations:selected.length,moves:selected.filter(o=>o.type==='MOVE_FILE').length,quarantines:selected.filter(o=>o.type==='QUARANTINE_FILE').length,
     totalBytes,checkpointBytes:totalBytes,recoveryCapacity:capacity,
     missingSources:{count:missingSources.length,items:missingSources.slice(0,20)},
+    analysisSnapshot:{available:freshness.available,scanId:freshness.scanId,changedSinceAnalysis:{count:freshness.count,items:freshness.items}},
     existingTargetConflicts:{count:existingTargetConflicts.length,items:existingTargetConflicts.slice(0,20)},
     plannedTargetCollisions:{count:plannedTargetCollisions.length,items:plannedTargetCollisions.slice(0,20)},
     protected:{projects:Number(skipped.repositoryCount||0),technical:Number(skipped.technicalCount||0),system:Number(skipped.systemCount||0)},
-    safeToStart:missingSources.length===0&&capacity.enough!==false,
-    movementStrategy:'copy_verify_commit',checkpointRequired:true,retentionModes:[...RETENTION_MODES]
+    safeToStart:missingSources.length===0&&freshness.available&&freshness.count===0&&capacity.enough!==false,
+    movementStrategy:'copy_verify_commit',checkpointRequired:true,stalePlanBlocked:true,checkpointHashBinding:true,retentionModes:[...RETENTION_MODES]
   };
 }
 
-async function verifiedTransfer(source,target,{preserveOriginal=false}={}){
+async function verifiedTransfer(source,target,{preserveOriginal=false,expectedHash=null}={}){
   const beforeHash=await hashFile(source);
+  if(expectedHash&&beforeHash!==expectedHash)throw new Error('O arquivo mudou depois do checkpoint. A origem foi preservada e a transferência foi bloqueada.');
   const tmp=path.join(path.dirname(target),`.${path.basename(target)}.rbwi-${process.pid}-${crypto.randomBytes(6).toString('hex')}.tmp`);
   let committed=false;
   try{
@@ -60,11 +71,11 @@ async function verifiedTransfer(source,target,{preserveOriginal=false}={}){
     const afterHash=await hashFile(target);
     if(afterHash!==beforeHash){await rm(target,{force:true}).catch(()=>{});committed=false;throw new Error('Destino final falhou na validação SHA-256. A origem foi preservada.');}
 
-    if(preserveOriginal)return{beforeHash,afterHash,sourceRemoved:false,sourceRetainedReason:'retention_mode'};
+    if(preserveOriginal)return{beforeHash,afterHash,checkpointHash:expectedHash,sourceRemoved:false,sourceRetainedReason:'retention_mode'};
     const sourceHashNow=await hashFile(source).catch(()=>null);
-    if(!sourceHashNow||sourceHashNow!==beforeHash)return{beforeHash,afterHash,sourceRemoved:false,sourceRetainedReason:'source_changed_after_copy'};
-    try{await unlink(source);return{beforeHash,afterHash,sourceRemoved:true,sourceRetainedReason:null};}
-    catch{return{beforeHash,afterHash,sourceRemoved:false,sourceRetainedReason:'source_remove_failed'};}
+    if(!sourceHashNow||sourceHashNow!==beforeHash)return{beforeHash,afterHash,checkpointHash:expectedHash,sourceRemoved:false,sourceRetainedReason:'source_changed_after_copy'};
+    try{await unlink(source);return{beforeHash,afterHash,checkpointHash:expectedHash,sourceRemoved:true,sourceRetainedReason:null};}
+    catch{return{beforeHash,afterHash,checkpointHash:expectedHash,sourceRemoved:false,sourceRetainedReason:'source_remove_failed'};}
   }catch(e){
     await rm(tmp,{force:true}).catch(()=>{});
     if(committed&&await exists(target))await rm(target,{force:true}).catch(()=>{});
@@ -72,12 +83,12 @@ async function verifiedTransfer(source,target,{preserveOriginal=false}={}){
   }
 }
 
-async function executeOne(op,{retentionMode='remove_after_verified_copy'}={}){
-  const record={id:op.id,type:op.type,before:op.before,requestedAfter:op.after,status:'pending',movementStrategy:'copy_verify_commit',retentionMode};
+async function executeOne(op,{retentionMode='remove_after_verified_copy',expectedHash=null}={}){
+  const record={id:op.id,type:op.type,before:op.before,requestedAfter:op.after,status:'pending',movementStrategy:'copy_verify_commit',retentionMode,checkpointHash:expectedHash};
   try{
     const source=assertAllowedPath(op.before),sourceStat=await stat(source).catch(()=>null);if(!sourceStat?.isFile())throw new Error('Arquivo de origem não existe mais.');
     let target=assertAllowedPath(op.after);target=await uniqueTarget(target);await mkdir(path.dirname(target),{recursive:true});
-    const transfer=await verifiedTransfer(source,target,{preserveOriginal:retentionMode==='preserve_original'});
+    const transfer=await verifiedTransfer(source,target,{preserveOriginal:retentionMode==='preserve_original',expectedHash});
     Object.assign(record,{after:target,...transfer,status:'completed',completedAt:now()});
     if(transfer.sourceRetainedReason)record.warning=transfer.sourceRetainedReason==='retention_mode'?'Original preservado por modo de retenção.':transfer.sourceRetainedReason==='source_changed_after_copy'?'A origem mudou durante a operação e foi preservada.':'Não foi possível remover a origem; ela foi preservada.';
   }catch(e){record.status='failed';record.error=e.message;}
@@ -86,16 +97,18 @@ async function executeOne(op,{retentionMode='remove_after_verified_copy'}={}){
 
 async function run(j){let tx=null;try{
   const state=await readState(),plan=state.plans.find(p=>p.id===j.planId);if(!plan)throw new Error('Plano não encontrado. Faça uma nova análise.');const ids=new Set(j.operationIds||[]),selected=plan.operations.filter(o=>ids.has(o.id));if(!selected.length)throw new Error('Selecione ao menos uma operação.');j.counters.requested=selected.length;j.counters.remaining=selected.length;
+  await requireFreshAnalysis(state,plan,selected);
   setJob(j,{status:'running',phase:'checkpoint',percent:1,message:`Criando checkpoint físico de ${selected.length} arquivo(s) antes de mover qualquer coisa…`});
   const recovery=await createRecoveryCheckpoint({planId:j.planId,operations:selected,isCancelled:()=>j.cancelled,onProgress:p=>{j.current=p.file||'';j.counters.checkpointProcessed=p.processed||0;j.counters.checkpointTotal=p.total||selected.length;j.counters.checkpointBytes=p.bytes||0;j.counters.checkpointTotalBytes=p.totalBytes||0;setJob(j,{percent:Math.max(1,Math.min(20,Math.floor((p.processed||0)/Math.max(1,p.total||1)*20))),message:`Checkpoint de segurança ${p.processed||0}/${p.total||selected.length} · nenhum arquivo foi movido ainda`});}});
   j.checkpointId=recovery.id;j.current='';
   if(j.cancelled){setJob(j,{status:'cancelled',phase:'cancelled',message:'Execução cancelada antes de qualquer movimentação. O checkpoint foi preservado.',finishedAt:now(),percent:20});return;}
+  const checkpointHashes=new Map((recovery.entries||[]).map(e=>[e.operationId,e.sha256||null]));
   tx={id:id('tx'),planId:j.planId,spaceId:plan.spaceId,checkpointId:recovery.id,retentionMode:j.retentionMode,createdAt:now(),status:'running',operations:[],summary:{requested:selected.length,completed:0,failed:0,retainedOriginals:0}};j.transaction=tx;await saveTransaction(tx);
-  setJob(j,{status:'running',phase:'moving',percent:20,message:`Checkpoint ${recovery.id} pronto. Iniciando ${selected.length} movimentações com cópia + validação SHA-256…`});
+  setJob(j,{status:'running',phase:'moving',percent:20,message:`Checkpoint ${recovery.id} pronto. Iniciando ${selected.length} movimentações vinculadas ao SHA-256 protegido…`});
   for(let i=0;i<selected.length;i++){
     if(j.cancelled)break;
     const op=selected[i];j.current=op.before;setJob(j,{message:`Protegendo e finalizando ${i+1}/${selected.length} · ${path.basename(op.before)}`});
-    const record=await executeOne(op,{retentionMode:j.retentionMode});tx.operations.push(record);
+    const record=await executeOne(op,{retentionMode:j.retentionMode,expectedHash:checkpointHashes.get(op.id)||null});tx.operations.push(record);
     if(record.status==='completed'){tx.summary.completed++;if(!record.sourceRemoved)tx.summary.retainedOriginals++;}else tx.summary.failed++;
     const processed=i+1;j.counters.processed=processed;j.counters.completed=tx.summary.completed;j.counters.failed=tx.summary.failed;j.counters.retainedOriginals=tx.summary.retainedOriginals;j.counters.remaining=Math.max(0,selected.length-processed);
     setJob(j,{percent:20+Math.max(1,Math.floor(processed/selected.length*80)),message:`${processed}/${selected.length} processadas · ${tx.summary.completed} finalizadas · ${tx.summary.failed} falharam${tx.summary.retainedOriginals?` · ${tx.summary.retainedOriginals} originais preservados`:''} · checkpoint ${recovery.id}`});
