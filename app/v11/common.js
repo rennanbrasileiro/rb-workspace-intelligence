@@ -1,6 +1,6 @@
 export const $=id=>document.getElementById(id);
 export const api=async(url,opts={})=>{const r=await fetch(url,{cache:'no-store',...opts,headers:{'content-type':'application/json',...(opts.headers||{})}});const j=await r.json();try{document.dispatchEvent(new CustomEvent('rbwi:api-response',{detail:{url,method:opts.method||'GET',status:r.status,data:j}}))}catch{}if(!r.ok||j.ok===false)throw Error(j.error||'Falha na operação');return j};
-export const post=(url,data={})=>api(url,{method:'POST',body:JSON.stringify(data)});
+export const post=(url,data={})=>{const payload=url==='/api/execution/jobs'&&globalThis.__rbAllowPendingExecution===true?{...data,allowPending:true}:data;return api(url,{method:'POST',body:JSON.stringify(payload)})};
 export function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),3600)}
 export function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 export function fmtDate(v){try{return new Date(v).toLocaleString('pt-BR')}catch{return v||''}}
