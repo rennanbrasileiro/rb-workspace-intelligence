@@ -30,18 +30,17 @@ try{
   assert.equal(rolled.rollbackResults[0].organizedCopyPreserved,true);
   assert.equal(typeof executionPreflight,'function');
 
-  // O perfil inteiro é bloqueado nos dois motores e só o Organizer novo aceita reconhecimento avançado explícito.
   assert.throws(()=>validateOrganizerScope(os.homedir()),/bloqueado por padrão/i);
   const advanced=validateOrganizerScope(os.homedir(),{allowProfileRoot:true});
   assert.equal(advanced.advanced,true);
   await assert.rejects(()=>scanFolder(os.homedir(),'pessoal'),/perfil inteiro está bloqueada/i);
 
-  // Motores legados destrutivos não podem voltar a executar nem por import direto.
   await assert.rejects(()=>executePlan(),/desativada permanentemente/i);
   await assert.rejects(()=>rollbackTransaction(),/desativado permanentemente/i);
 
   const server=await readFile(new URL('../server.mjs',import.meta.url),'utf8');
   const organizerUi=await readFile(new URL('../app/v11/files.js',import.meta.url),'utf8');
+  const recoveryUi=await readFile(new URL('../app/v11/recovery.js',import.meta.url),'utf8');
   const launcher=await readFile(new URL('../tools/RB_WORKSPACE_LATEST.ps1',import.meta.url),'utf8');
   const installer=await readFile(new URL('../tools/INSTALAR_RB_WORKSPACE_ULTIMA_VERSAO.ps1',import.meta.url),'utf8');
   const bootstrap=await readFile(new URL('../tools/BOOTSTRAP_RB_WORKSPACE.ps1',import.meta.url),'utf8');
@@ -60,6 +59,9 @@ try{
   assert.match(organizerUi,/REVISÃO DE SEGURANÇA/);
   assert.match(organizerUi,/preserve_original/);
   assert.match(organizerUi,/Centro de Recuperação/);
+  assert.match(recoveryUi,/backup_changed/);
+  assert.match(recoveryUi,/somente auditoria/);
+  assert.match(recoveryUi,/Nenhum original existente é sobrescrito silenciosamente/);
   assert.match(launcher,/last-valid\.json/);
   assert.match(launcher,/Modo offline/);
   assert.match(launcher,/buildCommit -eq \$sha/);
@@ -73,7 +75,7 @@ try{
   assert.doesNotMatch(rootInstaller,/START_RB_WORKSPACE\.cmd/);
   assert.match(rootInstaller,/BOOTSTRAP_RB_WORKSPACE\.ps1/);
 
-  console.log('Release contract OK · v1.9 · preflight · safe rollback · recovery center · legacy engines retired · profile guard · offline launcher · canonical bootstrap');
+  console.log('Release contract OK · v1.9 · preflight · safe rollback · audited Recovery Center · legacy engines retired · profile guard · offline launcher · canonical bootstrap');
 } finally {
   await rm(root,{recursive:true,force:true});
   await rm(data,{recursive:true,force:true});
