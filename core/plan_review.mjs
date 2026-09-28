@@ -9,6 +9,7 @@ const REFERENCE_EXTS=new Set(['.html','.htm','.url','.lnk']);
 const RESERVED=/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 function now(){return new Date().toISOString();}
 function samePath(a,b){const left=path.resolve(a),right=path.resolve(b);return process.platform==='win32'?left.toLowerCase()===right.toLowerCase():left===right;}
+function pathKey(p){const r=path.resolve(String(p||''));return process.platform==='win32'?r.toLowerCase():r;}
 function locate(state,opId){for(const plan of state.plans||[]){const operation=(plan.operations||[]).find(o=>o.id===opId);if(operation)return{plan,operation};}throw new Error('Operação de revisão não encontrada. Refaça a análise se o plano já expirou.');}
 function referenceRisk(operation){const ext=path.extname(operation.before||operation.after||'').toLowerCase();return REFERENCE_EXTS.has(ext);}
 function safeFilename(input,expectedExt){const name=String(input||'').trim();if(!name||name==='.'||name==='..')throw new Error('Informe um nome de arquivo válido.');if(path.basename(name)!==name||/[<>:"/\\|?*\u0000-\u001f]/.test(name)||RESERVED.test(name))throw new Error('O nome contém caracteres ou um identificador reservado pelo Windows.');const ext=path.extname(name).toLowerCase();if(expectedExt&&ext!==expectedExt.toLowerCase())throw new Error(`A extensão deve permanecer ${expectedExt}. Renomeie apenas o arquivo, sem alterar o tipo.`);return name.slice(0,220);}
@@ -25,6 +26,16 @@ function nameSuggestions(operation,doc,sourceStat){
   if(context&&category&&category.toLocaleLowerCase('pt-BR')!==context.toLocaleLowerCase('pt-BR'))add('Contexto + tipo',`${context} - ${category}`,'context');
   return out.slice(0,5);
 }
+function destinationSuggestions(plan,operation){
+  const out=[],seen=new Set(),current=path.dirname(operation.after||operation.before||'');
+  const add=(label,dir,source)=>{if(!dir)return;let safe;try{safe=assertAllowedPath(dir)}catch{return}const k=pathKey(safe);if(seen.has(k))return;seen.add(k);out.push({label,path:safe,source});};
+  add('Pasta sugerida',current,'plan');
+  const others=(plan.operations||[]).filter(o=>o.id!==operation.id&&o.type!=='QUARANTINE_FILE'&&o.after);
+  for(const o of others.filter(o=>(o.family||o.subject||'')===(operation.family||operation.subject||'')))add('Mesmo tema',path.dirname(o.after),'family');
+  for(const o of others.filter(o=>(o.area||'')===(operation.area||'')))add('Mesma área',path.dirname(o.after),'area');
+  add('Raiz organizada',plan.destinationRoot,'root');
+  return out.slice(0,6);
+}
 function publicOperation(op){return{id:op.id,type:op.type,before:op.before,after:op.after,reason:op.reason||'',confidence:op.confidence||'',recommended:Boolean(op.recommended),area:op.area||'Outros',family:op.family||'',subject:op.subject||'Geral',subtopic:op.subtopic||'',category:op.category||'',referenceRisk:referenceRisk(op),reviewEdited:Boolean(op.reviewEdited),reviewExcluded:Boolean(op.reviewExcluded),reviewApproved:Boolean(op.reviewApproved),reviewQuarantined:op.type==='QUARANTINE_FILE',reviewStatus:reviewStatus(op)};}
 function reviewCounts(operations=[]){return operations.reduce((a,o)=>{const status=reviewStatus(o);a[status]=(a[status]||0)+1;a.total++;if(status!=='pending')a.reviewed++;if(referenceRisk(o))a.references++;return a;},{total:0,reviewed:0,pending:0,approved:0,adjusted:0,excluded:0,quarantine:0,references:0});}
 function pushHistory(operation,before,note){operation.reviewedAt=now();operation.reviewHistory=[...(operation.reviewHistory||[]),{at:operation.reviewedAt,before,after:reviewSnapshot(operation),note:String(note||'Ajuste manual').slice(0,300)}].slice(-30);}
@@ -38,6 +49,7 @@ export async function getOperationReview(opId){
     source:{path:source,name:path.basename(source),ext:path.extname(source).toLowerCase(),exists:Boolean(s?.isFile()),size:s?.size??null,modifiedAt:s?.mtime?.toISOString?.()||null},
     document:doc?{name:doc.name||path.basename(source),topic:doc.topic||'',bucket:doc.bucket||'',area:doc.area||'',summary:doc.summary||'',method:doc.method||'',complete:doc.complete!==false,textLength:doc.textLength||0,error:doc.error||''}:null,
     nameSuggestions:nameSuggestions(operation,doc,s),
+    destinationSuggestions:destinationSuggestions(plan,operation),
     trace:{original:operation.reviewOriginal||reviewSnapshot(operation),history:operation.reviewHistory||[],edited:Boolean(operation.reviewEdited),approved:Boolean(operation.reviewApproved),status:reviewStatus(operation)}
   };
 }
@@ -103,4 +115,4 @@ export async function selectionReferenceProtection(planId,operationIds=[]){
   return{count:risky.length,required:risky.length>0,forcedRetentionMode:risky.length?'preserve_original':null,items:risky.slice(0,20).map(o=>({id:o.id,path:o.before,target:o.after,ext:path.extname(o.before||'').toLowerCase()}))};
 }
 
-export function reviewSafetySummary(){return{referenceExtensions:[...REFERENCE_EXTS],referencePolicy:'preserve_original',quarantineRoot:path.join(home,'_RB_Quarantine','Revisao'),hardDeleteAvailable:false,reviewStatuses:['pending','approved','adjusted','excluded','quarantine'],pendingExecutionRequiresExplicitApproval:true,contextualFilenameSuggestions:true,home};}
+export function reviewSafetySummary(){return{referenceExtensions:[...REFERENCE_EXTS],referencePolicy:'preserve_original',quarantineRoot:path.join(home,'_RB_Quarantine','Revisao'),hardDeleteAvailable:false,reviewStatuses:['pending','approved','adjusted','excluded','quarantine'],pendingExecutionRequiresExplicitApproval:true,contextualFilenameSuggestions:true,contextualDestinationSuggestions:true,home};}
