@@ -5,7 +5,8 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { ensureState, readState, upsertSpace, removeSpace, replacePlan } from './core/storage.mjs';
-import { scanFolder, analyzeScan, rollbackTransaction, commonFolders, getWorkspaceSummary, assertAllowedPath } from './core/workspace.mjs';
+import { scanFolder, analyzeScan, commonFolders, getWorkspaceSummary, assertAllowedPath } from './core/workspace.mjs';
+import { rollbackTransactionSafe } from './core/rollback_safe.mjs';
 import { devStatus, runConsole, projectAction, checkUpdate, pullUpdate, restartApp, addProject, repoRoot } from './core/dev.mjs';
 import { listLocalProjects, inspectLocalProject, cloneLocalProject, addExistingProject, createEmptyProject, localProjectAction, localGit, localConsole } from './core/projects.mjs';
 import { indexFolderDocuments, enrichPlanWithDocuments } from './core/documents.mjs';
@@ -18,7 +19,9 @@ import { auditHistoricalRecovery, listRecoveryCheckpoints, restoreRecoveryCheckp
 
 const root=path.dirname(fileURLToPath(import.meta.url));
 const port=Number(process.env.PORT||4310);
-const version='1.8.0';
+const packageInfo=JSON.parse(await readFile(path.join(root,'package.json'),'utf8'));
+const version=packageInfo.version;
+const buildCommit=process.env.RBWI_COMMIT_SHA||null;
 await ensureState();
 function sendJson(res,status,data){res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data));}
 async function body(req){let b='';for await(const c of req){b+=c;if(b.length>2_000_000)throw new Error('Payload muito grande.');}return b?JSON.parse(b):{};}
@@ -40,7 +43,7 @@ async function projectWithTree(id){const project=await inspectLocalProject(id);i
 
 const server=http.createServer(async(req,res)=>{try{
   const u=new URL(req.url,'http://127.0.0.1');
-  if(u.pathname==='/api/system'&&req.method==='GET'){const ws=await getWorkspaceSummary(),state=await readState();return sendJson(res,200,{ok:true,version,machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,safety:{physicalCheckpointRequired:true,legacyExecuteBlocked:true,recoveryCenter:true},...ws});}
+  if(u.pathname==='/api/system'&&req.method==='GET'){const ws=await getWorkspaceSummary(),state=await readState();return sendJson(res,200,{ok:true,version,buildCommit,machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,safety:{physicalCheckpointRequired:true,legacyExecuteBlocked:true,recoveryCenter:true,transferStrategy:'copy_verify_commit',safeRollback:true,fullProfileAnalysisBlockedByDefault:true},...ws});}
   if(u.pathname==='/api/spaces'&&req.method==='POST')return sendJson(res,200,{ok:true,space:await upsertSpace(await body(req))});
   if(u.pathname.startsWith('/api/spaces/')&&req.method==='DELETE')return sendJson(res,200,{ok:true,removed:await removeSpace(decodeURIComponent(u.pathname.split('/').pop()))});
   if(u.pathname==='/api/pick/folder'&&req.method==='POST')return sendJson(res,200,{ok:true,path:powershellDialog('folder')});
@@ -50,7 +53,7 @@ const server=http.createServer(async(req,res)=>{try{
   if(u.pathname.startsWith('/api/organizer/jobs/')&&u.pathname.endsWith('/cancel')&&req.method==='POST'){const id=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,job:cancelOrganizerJob(id)});}
   if(u.pathname.startsWith('/api/organizer/jobs/')&&req.method==='GET'){const id=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,job:organizerJobStatus(id)});}
 
-  if(u.pathname==='/api/execution/jobs'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,job:startExecutionJob({planId:b.planId,operationIds:b.operationIds})});}
+  if(u.pathname==='/api/execution/jobs'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,job:startExecutionJob({planId:b.planId,operationIds:b.operationIds,retentionMode:b.retentionMode||'remove_after_verified_copy'})});}
   if(u.pathname.startsWith('/api/execution/jobs/')&&u.pathname.endsWith('/cancel')&&req.method==='POST'){const id=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,job:cancelExecutionJob(id)});}
   if(u.pathname.startsWith('/api/execution/jobs/')&&req.method==='GET'){const id=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,job:executionJobStatus(id)});}
 
@@ -58,10 +61,10 @@ const server=http.createServer(async(req,res)=>{try{
   if(u.pathname==='/api/recovery/checkpoints'&&req.method==='GET')return sendJson(res,200,{ok:true,checkpoints:await listRecoveryCheckpoints()});
   if(u.pathname.startsWith('/api/recovery/checkpoints/')&&u.pathname.endsWith('/restore')&&req.method==='POST'){const checkpointId=decodeURIComponent(u.pathname.split('/')[4]),b=await body(req);return sendJson(res,200,{ok:true,restore:await restoreRecoveryCheckpoint(checkpointId,{dryRun:b.dryRun!==false})});}
 
-  if(u.pathname==='/api/workspace/scan'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,scan:await scanFolder(b.path,b.spaceId)});}
+  if(u.pathname==='/api/workspace/scan'&&req.method==='POST'){const b=await body(req),selected=assertAllowedPath(b.path);if(path.resolve(selected)===path.resolve(os.homedir()))return sendJson(res,409,{ok:false,error:'A análise do perfil inteiro está bloqueada por segurança. Escolha Área de Trabalho, Downloads, Documentos ou outra pasta específica.'});return sendJson(res,200,{ok:true,scan:await scanFolder(selected,b.spaceId)});}
   if(u.pathname==='/api/workspace/analyze'&&req.method==='POST'){const b=await body(req),plan=await analyzeScan(b.scanId,b.spaceId),state=await readState(),scan=state.scans.find(s=>s.id===b.scanId);let enriched=plan;try{const docs=indexFolderDocuments(scan?.files||[]);enriched=enrichPlanWithDocuments(plan,docs);await replacePlan(enriched);}catch(e){enriched={...plan,documentIntelligence:{count:0,readComplete:0,failed:0,error:e.message},findings:[...(plan.findings||[]),{type:'document_read_error',severity:'low',message:`A organização estrutural foi concluída, mas a leitura documental encontrou um problema: ${e.message}`}]};await replacePlan(enriched);}return sendJson(res,200,{ok:true,plan:enriched});}
   if(u.pathname==='/api/workspace/execute'&&req.method==='POST')return sendJson(res,409,{ok:false,error:'Execução legada bloqueada por segurança. Use o executor protegido, que cria checkpoint físico antes de mover qualquer arquivo.'});
-  if(u.pathname.startsWith('/api/transactions/')&&u.pathname.endsWith('/rollback')&&req.method==='POST'){const parts=u.pathname.split('/');return sendJson(res,200,{ok:true,transaction:await rollbackTransaction(parts[3])});}
+  if(u.pathname.startsWith('/api/transactions/')&&u.pathname.endsWith('/rollback')&&req.method==='POST'){const parts=u.pathname.split('/');return sendJson(res,200,{ok:true,transaction:await rollbackTransactionSafe(parts[3])});}
   if(u.pathname==='/api/document/read'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,document:readDocument(b.path)});}
 
   if(u.pathname==='/api/projects/status'&&req.method==='GET')return sendJson(res,200,{ok:true,...await listLocalProjects()});
@@ -94,4 +97,4 @@ const server=http.createServer(async(req,res)=>{try{
 }catch(e){console.error('[RBWI]',e.stack||e.message||e);if((req.url||'').startsWith('/api/'))return sendJson(res,400,{ok:false,error:e.message||String(e)});res.writeHead(404,{'content-type':'text/plain; charset=utf-8'});res.end('Not found');}});
 server.on('clientError',(err,socket)=>{console.error('[HTTP]',err.message);socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');});
 process.on('uncaughtException',e=>console.error('[UNCAUGHT]',e));process.on('unhandledRejection',e=>console.error('[UNHANDLED]',e));
-server.listen(port,'127.0.0.1',()=>console.log(`RB Workspace Intelligence v${version} · http://127.0.0.1:${port} · ${repoRoot}`));
+server.listen(port,'127.0.0.1',()=>console.log(`RB Workspace Intelligence v${version}${buildCommit?` · ${buildCommit.slice(0,8)}`:''} · http://127.0.0.1:${port} · ${repoRoot}`));
