@@ -8,6 +8,7 @@ import { ensureState, readState, upsertSpace, removeSpace, replacePlan } from '.
 import { scanFolder, analyzeScan, commonFolders, getWorkspaceSummary, assertAllowedPath } from './core/workspace.mjs';
 import { rollbackTransactionSafe } from './core/rollback_safe.mjs';
 import { getOperationReview, getLatestReviewPlan, updateOperationReview, quarantineOperationReview, resetOperationReview, filterReviewedSelection, selectionReferenceProtection, reviewSafetySummary } from './core/plan_review.mjs';
+import { getAnalyzedInventory } from './core/inventory_review.mjs';
 import { devStatus, runConsole, projectAction, checkUpdate, pullUpdate, restartApp, addProject, repoRoot } from './core/dev.mjs';
 import { listLocalProjects, inspectLocalProject, cloneLocalProject, addExistingProject, createEmptyProject, localProjectAction, localGit, localConsole } from './core/projects.mjs';
 import { indexFolderDocuments, enrichPlanWithDocuments } from './core/documents.mjs';
@@ -46,13 +47,14 @@ function openPath(input){const resolved=assertAllowedPath(input);if(process.plat
 
 const server=http.createServer(async(req,res)=>{try{
   const u=new URL(req.url,'http://127.0.0.1');
-  if(u.pathname==='/api/system'&&req.method==='GET'){const ws=await getWorkspaceSummary(),state=await readState();return sendJson(res,200,{ok:true,version,buildCommit,machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,safety:{physicalCheckpointRequired:true,legacyExecuteBlocked:true,recoveryCenter:true,transferStrategy:'copy_verify_commit',safeRollback:true,fullProfileAnalysisBlockedByDefault:true,executionPreflight:true,interactivePlanReview:true,externalReferencePreservation:true,persistentReviewExclusions:true,safeQuarantine:true,hardDeleteAvailable:false,pendingExecutionRequiresExplicitApproval:true},reviewSafety:reviewSafetySummary(),...ws});}
+  if(u.pathname==='/api/system'&&req.method==='GET'){const ws=await getWorkspaceSummary(),state=await readState();return sendJson(res,200,{ok:true,version,buildCommit,machine:{hostname:os.hostname(),platform:os.platform(),home:os.homedir()},commonFolders:commonFolders(),settings:state.settings,safety:{physicalCheckpointRequired:true,legacyExecuteBlocked:true,recoveryCenter:true,transferStrategy:'copy_verify_commit',safeRollback:true,fullProfileAnalysisBlockedByDefault:true,executionPreflight:true,interactivePlanReview:true,externalReferencePreservation:true,persistentReviewExclusions:true,safeQuarantine:true,hardDeleteAvailable:false,pendingExecutionRequiresExplicitApproval:true,analyzedInventoryReadOnly:true},reviewSafety:reviewSafetySummary(),...ws});}
   if(u.pathname==='/api/spaces'&&req.method==='POST')return sendJson(res,200,{ok:true,space:await upsertSpace(await body(req))});
   if(u.pathname.startsWith('/api/spaces/')&&req.method==='DELETE')return sendJson(res,200,{ok:true,removed:await removeSpace(decodeURIComponent(u.pathname.split('/').pop()))});
   if(u.pathname==='/api/pick/folder'&&req.method==='POST')return sendJson(res,200,{ok:true,path:powershellDialog('folder')});
   if(u.pathname==='/api/pick/file'&&req.method==='POST')return sendJson(res,200,{ok:true,path:powershellDialog('file')});
 
   if(u.pathname==='/api/review/latest-plan'&&req.method==='GET')return sendJson(res,200,{ok:true,plan:await getLatestReviewPlan()});
+  if(u.pathname==='/api/review/inventory'&&req.method==='GET')return sendJson(res,200,{ok:true,inventory:await getAnalyzedInventory({q:u.searchParams.get('q')||'',status:u.searchParams.get('status')||'all',offset:Number(u.searchParams.get('offset')||0),limit:Number(u.searchParams.get('limit')||100)})});
   if(u.pathname==='/api/review/reveal'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,path:revealPath(b.path)});}
   if(u.pathname==='/api/review/open'&&req.method==='POST'){const b=await body(req);return sendJson(res,200,{ok:true,path:openPath(b.path)});}
   if(u.pathname.startsWith('/api/review/operations/')&&u.pathname.endsWith('/quarantine')&&req.method==='POST'){const opId=decodeURIComponent(u.pathname.split('/')[4]);return sendJson(res,200,{ok:true,review:await quarantineOperationReview(opId)});}
