@@ -12,12 +12,28 @@ try{
   checkpoint=await createRecoveryCheckpoint({planId:'smoke-plan',operations:[{id:'op-smoke',type:'MOVE_FILE',before:source,after:target}]});
   assert.equal(checkpoint.status,'ready');assert.equal(checkpoint.totalFiles,1);
   await mkdir(path.dirname(target),{recursive:true});await rename(source,target);
+
   const dry=await restoreRecoveryCheckpoint(checkpoint.id,{dryRun:true});
   assert.equal(dry.summary.wouldRestore,1);
+
   const restored=await restoreRecoveryCheckpoint(checkpoint.id,{dryRun:false});
   assert.equal(restored.summary.restored,1);
   assert.equal(await readFile(source,'utf8'),'conteudo-importante-nao-pode-sumir');
   assert.equal(await readFile(target,'utf8'),'conteudo-importante-nao-pode-sumir');
+
+  const alreadySafe=await restoreRecoveryCheckpoint(checkpoint.id,{dryRun:true});
+  assert.equal(alreadySafe.summary.originalMatchesCheckpoint,1);
+  assert.equal(alreadySafe.summary.originalChanged,0);
+
+  await writeFile(source,'conteudo-alterado-depois-do-checkpoint','utf8');
+  const changed=await restoreRecoveryCheckpoint(checkpoint.id,{dryRun:true});
+  assert.equal(changed.summary.originalChanged,1);
+  assert.equal(changed.summary.originalMatchesCheckpoint,0);
+  assert.equal(await readFile(source,'utf8'),'conteudo-alterado-depois-do-checkpoint');
+
+  const applyChanged=await restoreRecoveryCheckpoint(checkpoint.id,{dryRun:false});
+  assert.equal(applyChanged.summary.originalChanged,1);
+  assert.equal(await readFile(source,'utf8'),'conteudo-alterado-depois-do-checkpoint');
   console.log('smoke-recovery ok',checkpoint.id);
 }finally{
   await rm(base,{recursive:true,force:true});
